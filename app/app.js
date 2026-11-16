@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '2.0.0';
+const VERSION = '3.0.0';
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -61,7 +61,7 @@ function migrateV1(d) {
   return db;
 }
 function normalize(d) {
-  const db = { ...emptyDb(), ...d }; db.settings = { ...defaultSettings(), ...d.settings };
+  const db = { ...emptyDb(), ...d }; db.settings = { ...defaultSettings(), ...d.settings }; if (db.settings.setupDone === undefined) db.settings.setupDone = db.rows.length > 0 || (d.rows || []).length > 0;
   ['rows', 'devs', 'atas'].forEach(k => db[k] = Array.isArray(db[k]) ? db[k] : []); db.days = db.days || {}; return db;
 }
 function load() {
@@ -108,9 +108,9 @@ async function addImages(files) {
   }
   return ids;
 }
-function allRefs() { const s = new Set(); [...db.rows, ...db.devs, ...db.atas].forEach(x => (x.imageIds || []).forEach(i => s.add(i))); [rd, dv, at].forEach(x => x && (x.imageIds || []).forEach(i => s.add(i))); return s; }
+function allRefs() { const s = new Set(); [...db.rows, ...db.devs, ...db.atas, ...Object.values(db.days)].forEach(x => (x.imageIds || []).forEach(i => s.add(i))); [rd, dv, at].forEach(x => x && (x.imageIds || []).forEach(i => s.add(i))); return s; }
 async function deleteImage(id) {
-  [...db.rows, ...db.devs, ...db.atas, rd, dv, at].forEach(x => { if (x && x.imageIds) x.imageIds = x.imageIds.filter(i => i !== id); });
+  [...db.rows, ...db.devs, ...db.atas, ...Object.values(db.days), rd, dv, at].forEach(x => { if (x && x.imageIds) x.imageIds = x.imageIds.filter(i => i !== id); });
   save(); thumbs.delete(id); await IDB.del(id);
 }
 async function deleteImages(ids) { for (const id of ids || []) { thumbs.delete(id); await IDB.del(id); } }
@@ -126,7 +126,9 @@ document.addEventListener('change', async e => {
   const t = e.target; if (!t.dataset.photo) return;
   const files = [...t.files]; t.value = ''; if (!files.length) return;
   toast('Sparar bild…');
-  const ids = await addImages(files); const d = draftFor(t.dataset.photo);
+  const ids = await addImages(files);
+  if (t.dataset.photo === 'day') { setDay(cur, { imageIds: [...(getDay(cur).imageIds || []), ...ids] }); renderToday(); if (ids.length) toast('Bild sparad på dagen ✓'); return; }
+  const d = draftFor(t.dataset.photo);
   d.imageIds = [...(d.imageIds || []), ...ids];
   const box = $('#photos-' + t.dataset.photo); if (box) box.innerHTML = thumbsHtml(d.imageIds);
   if (ids.length) toast(`${ids.length} bild${ids.length > 1 ? 'er' : ''} tillagd${ids.length > 1 ? 'a' : ''} ✓`);
@@ -147,190 +149,212 @@ const addonText = r => (r.addons || []).map(x => x.unit ? `${x.name} ${h(x.qty)}
 const statusLbl = s => (ATA_STATUS.find(x => x[0] === s) || [s, s])[1];
 const devType = k => DEV_TYPES.find(x => x[0] === k) || DEV_TYPES[5];
 
-/* ================= Registrera ================= */
+/* ================= Idag ================= */
 let cur = today();
-let rd = null, moreOpen = false;
+let rd = null, dv = null, at = null;
+let sheet = null, sheetMore = false, sheetAll = false, undoIds = null;
+const longDate = s => { const d = parse(s); return `${dayName(s)} ${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 function lastProjectFor(d) { const r = dayRows(d).slice(-1)[0] || [...db.rows].sort((x, y) => y.date.localeCompare(x.date) || (y.created || 0) - (x.created || 0))[0]; return r ? r.project : S().defaultProject; }
-function newRowDraft() {
-  const rem = num(S().otLimit || 8) - dayTotal(cur);
-  const catId = catById(S().lastCat) ? S().lastCat : (S().categories[0] || {}).id;
-  return { id: null, categoryId: catId, hours: rem > 0 ? rem : 1, project: lastProjectFor(cur), wo: '', addons: {}, km: { km: '', from: '', to: '' }, materials: [], note: '', imageIds: [] };
+const prevWorkDay = d => [...new Set(db.rows.map(r => r.date))].filter(x => x < d).sort().pop();
+function dateLabel(d) { const t = today(); if (d === t) return 'Idag'; if (d === ymd(addDays(t, -1))) return 'Igår'; if (d === ymd(addDays(t, 1))) return 'Imorgon'; return dayName(d); }
+function addonOrder(cat) {
+  const cnt = {}; db.rows.filter(r => r.categoryId === cat.id).forEach(r => (r.addons || []).forEach(x => cnt[x.id] = (cnt[x.id] || 0) + 1));
+  return cat.addons.map((x, i) => ({ x, i, c: cnt[x.id] || 0 })).sort((p, q) => q.c - p.c || p.i - q.i).map(o => o.x);
+}
+const rowSub = r => [r.project, addonText(r), r.km && r.km.km ? r.km.km + ' km' : '', r.note].filter(Boolean).join(' · ');
+function renderToday() {
+  const rows = dayRows(cur), tot = dayTotal(cur), lim = num(S().otLimit) || 8, day = getDay(cur);
+  const prev = prevWorkDay(cur), prevRows = prev ? dayRows(prev) : [];
+  const w = isoWeek(parse(cur)), mon = mondayOf(w.year, w.week);
+  const devs = db.devs.filter(x => x.date === cur), atas = db.atas.filter(x => x.date === cur);
+  const wdays = [...Array(7)].map((_, i) => ymd(addDays(mon, i)));
+  const wtot = wdays.reduce((s, d) => s + dayTotal(d), 0);
+  $('#view-today').innerHTML = `
+  <div class="dhead">
+    <button class="nb" data-act="dPrev" aria-label="Föregående dag">‹</button>
+    <label class="dl"><b id="dLabel">${dateLabel(cur)}</b><span>${longDate(cur)}</span><input type="date" id="dPick" value="${cur}" aria-label="Välj datum"></label>
+    <button class="nb" data-act="dNext" aria-label="Nästa dag">›</button>
+  </div>
+  ${cur !== today() ? '<button class="link" data-act="dToday">← Till idag</button>' : ''}
+  ${rows.length || devs.length || atas.length ? `<div class="daycard">
+      ${rows.length ? `<div class="dtot"><b id="dayTotal">${h(tot)} h</b><span>${tot > lim ? `<span class="ot">varav ${h(tot - lim)} h övertid</span>` : 'sparat ✓'}</span></div>` : ''}
+      <ul class="rows" id="dayList">${rows.map(r => `<li><button class="rowbtn" data-act="rowEdit" data-v="${r.id}"><i>${r.catIcon || '⏱️'}</i><span><b>${esc(r.catName)}</b><small>${esc(rowSub(r))}${r.imageIds?.length ? ` · 📷${r.imageIds.length}` : ''}</small></span><em>${h(r.hours)}</em></button></li>`).join('')}
+      ${devs.map(x => `<li><button class="rowbtn" data-act="devEdit" data-v="${x.id}"><i>⚠️</i><span><b>Avvikelse${x.status === 'fixed' ? ' ✓' : ''}</b><small>${esc(x.desc)}</small></span></button></li>`).join('')}
+      ${atas.map(x => `<li><button class="rowbtn" data-act="ataEdit" data-v="${x.id}"><i>➕</i><span><b>ÄTA ${x.nr}</b><small>${esc(x.desc)}</small></span><em>${x.hours ? h(x.hours) : ''}</em></button></li>`).join('')}</ul>
+      ${undoIds ? '<button class="link" data-act="undo" id="undoBtn">↶ Ångra</button>' : ''}
+    </div>` : ''}
+  ${!rows.length && prevRows.length ? `<button class="same" data-act="copyPrev" id="sameBtn"><b>${prev === ymd(addDays(cur, -1)) ? 'Samma som igår' : 'Samma som ' + fmtDate(prev)}</b><span>${h(dayTotal(prev))} h · ${esc([...new Set(prevRows.map(r => `${r.catIcon} ${r.catName}`))].join(' + '))} · ${esc([...new Set(prevRows.map(r => r.project))].join(', '))}</span></button>` : ''}
+  <div class="sect">${rows.length ? 'Lägg till mer' : prevRows.length ? 'Eller välj' : 'Vad har du kört?'}</div>
+  <div class="cats" id="cats">${S().categories.map(c => `<button class="cat" data-act="cat" data-v="${c.id}"><i>${esc(c.icon)}</i>${esc(c.name)}</button>`).join('')}</div>
+  <div class="tools">
+    <label class="tool" aria-label="Ta foto">📷<span>Foto</span><input type="file" accept="image/*" capture="environment" data-photo="day"></label>
+    <button class="tool" data-act="newDev" id="devBtn">⚠️<span>Avvikelse</span></button>
+    <button class="tool" data-act="newAta" id="ataBtn">➕<span>ÄTA</span></button>
+  </div>
+  ${day.imageIds?.length ? `<div class="photos" id="dayPhotos">${thumbsHtml(day.imageIds)}</div>` : ''}
+  <div class="sect">Vecka ${w.week} · <b>${h(wtot)} h</b></div>
+  <ul class="week">${wdays.map(d => { const t = dayTotal(d); return `<li><button data-act="goDate" data-v="${d}" class="${d === cur ? 'on' : ''}"><span>${dayName(d).slice(0, 3)} ${parse(d).getDate()}/${parse(d).getMonth() + 1}</span><small>${esc([...new Set(dayRows(d).map(r => r.catIcon))].join(' '))}</small><b class="${t > lim ? 'ot' : ''}">${t ? h(t) : '–'}</b></button></li>`; }).join('')}</ul>`;
+}
+function goDate(d) { cur = d; undoIds = null; renderToday(); }
+function copyPrev() {
+  const prev = prevWorkDay(cur); if (!prev) return;
+  const t = Date.now(); undoIds = [];
+  dayRows(prev).forEach((r, i) => { const id = uid(); undoIds.push(id); db.rows.push({ ...clone(r), id, date: cur, imageIds: [], created: t + i }); });
+  const pd = getDay(prev); setDay(cur, { place: getDay(cur).place || pd.place || '', breakMin: getDay(cur).breakMin ?? num(S().defBreak) });
+  save(); renderToday(); toast(`Sparat ${h(dayTotal(cur))} h ✓`);
+}
+
+/* ================= Bottenark ================= */
+function openSheet(kind) {
+  sheet = kind; sheetMore = false; sheetAll = false; renderSheet();
+  $('#sheet').classList.remove('hidden'); document.body.classList.add('noscroll');
+  if (!(history.state && history.state.sheet)) history.pushState({ sheet: 1 }, '');
+}
+function closeSheet(fromPop) {
+  if (!sheet) return; sheet = null; rd = dv = at = null;
+  $('#sheet').classList.add('hidden'); document.body.classList.remove('noscroll');
+  if (!fromPop && history.state && history.state.sheet) history.back();
+}
+addEventListener('popstate', () => closeSheet(true));
+function renderSheet() { if (!sheet) return; $('#sheetBody').innerHTML = { row: sheetRow, dev: sheetDev, ata: sheetAta }[sheet](); }
+const head = (icon, title, sub) => `<div class="sh-head"><i>${icon}</i><div><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</div><button class="x" data-act="close" aria-label="Stäng">✕</button></div>`;
+function newRowDraft(catId) {
+  const rem = (num(S().otLimit) || 8) - dayTotal(cur);
+  return { id: null, categoryId: catId, hours: rem > 0 ? rem : 2, project: lastProjectFor(cur), wo: '', addons: {}, km: { km: '', from: '', to: '' }, materials: [], note: '', imageIds: [] };
 }
 function rowToDraft(r) {
   const ad = {}; (r.addons || []).forEach(x => ad[x.id] = x.unit ? x.qty : '');
   return { id: r.id, categoryId: r.categoryId, hours: r.hours, project: r.project, wo: r.wo || '', addons: ad, km: { km: '', from: '', to: '', ...(r.km || {}) }, materials: clone(r.materials || []), note: r.note || '', imageIds: [...(r.imageIds || [])] };
 }
-function dateLabel(d) { const t = today(); if (d === t) return 'Idag'; if (d === ymd(addDays(t, -1))) return 'Igår'; if (d === ymd(addDays(t, 1))) return 'Imorgon'; return dayName(d); }
-function renderReg() {
-  if (!rd) rd = newRowDraft();
-  const day = getDay(cur), rows = dayRows(cur), tot = dayTotal(cur), lim = num(S().otLimit) || 8;
-  const brk = day.breakMin ?? S().defBreak;
-  const cat = catById(rd.categoryId);
-  const w = isoWeek(parse(cur));
-  const gps = day.gps ? `<a class="small" href="https://maps.google.com/?q=${day.gps.lat},${day.gps.lng}" target="_blank" rel="noopener">📍 ${day.gps.lat.toFixed(5)}, ${day.gps.lng.toFixed(5)} (±${Math.round(day.gps.acc)} m)</a>` : '';
-  $('#view-reg').innerHTML = `
-  <div class="card">
-    <div class="datebar">
-      <button class="big" data-act="dPrev" aria-label="Föregående dag">‹</button>
-      <label class="dl" style="margin:0;color:var(--fg)"><b id="dLabel">${dateLabel(cur)}</b><span class="muted">${fmtDate(cur)} · v ${w.week}</span><input type="date" id="dPick" value="${cur}"></label>
-      <button class="big" data-act="dNext" aria-label="Nästa dag">›</button>
-    </div>
-    ${cur !== today() ? '<button class="ghost" data-act="dToday">Gå till idag</button>' : ''}
-    <div class="row"><input type="text" id="dPlace" placeholder="Plats / arbetsplats" value="${esc(day.place || '')}" list="placeList" style="margin-top:10px"><button class="secondary" data-act="gps" style="flex:0 0 64px;margin-top:10px" aria-label="Hämta GPS-position">📍</button></div>
-    <datalist id="placeList">${[...new Set(Object.values(db.days).map(x => x.place).filter(Boolean))].map(p => `<option value="${esc(p)}">`).join('')}</datalist>
-    ${gps}
-    <div class="lbl">Rast</div>
-    <div class="quick">${[0, 30, 45, 60].map(m => `<button data-act="brk" data-v="${m}" class="${num(brk) === m ? 'sel' : ''}">${m ? m + ' min' : 'Ingen'}</button>`).join('')}</div>
-    <h3>Dagens rader</h3>
-    <ul class="list" id="dayList">${rows.map(r => `<li data-id="${r.id}"><div class="ic">${r.catIcon || '⏱️'}</div><div class="info"><b>${esc(r.catName)}</b><small>${esc([r.project, addonText(r), r.km && r.km.km ? r.km.km + ' km' : '', r.note].filter(Boolean).join(' · '))}${r.imageIds?.length ? ` · 📷${r.imageIds.length}` : ''}</small></div><div class="h">${h(r.hours)}</div><div class="act"><button data-act="rowEdit" aria-label="Redigera">✎</button><button data-act="rowDel" aria-label="Radera">🗑</button></div></li>`).join('') || '<li class="empty">Inget registrerat än.</li>'}</ul>
-    <div class="daytot"><span>Totalt ${tot > lim ? `<span class="ot">(övertid ${h(tot - lim)} h)</span>` : ''}</span><span class="num" id="dayTotal">${h(tot)} h</span></div>
-    ${rows.length ? '' : '<button class="secondary" data-act="copyPrev">⟲ Kopiera gårdagen</button>'}
-    ${day.signature ? `<div class="small muted" style="margin-top:8px">Signerad${day.sigName ? ' av ' + esc(day.sigName) : ''}<img class="sigimg" src="${day.signature}" alt="Signatur"></div><button class="ghost" data-act="sigDel">Ta bort signatur</button>` : (rows.length ? '<button class="ghost" data-act="sign">✍️ Signera dagen (valfritt)</button>' : '')}
-  </div>
-  <div class="card" id="rowForm">
-    <h2>${rd.id ? 'Redigera rad' : 'Lägg till rad'}</h2>
-    <div class="cats">${S().categories.map(c => `<button class="cat ${c.id === rd.categoryId ? 'sel' : ''}" data-act="cat" data-v="${c.id}"><i>${esc(c.icon)}</i>${esc(c.name)}</button>`).join('')}</div>
-    <div class="lbl">Timmar</div>
-    <div class="hours"><button class="big" data-act="hMinus" aria-label="Minska">−</button><input type="number" id="fHours" inputmode="decimal" step="0.5" min="0" max="24" value="${rd.hours}" aria-label="Timmar"><button class="big" data-act="hPlus" aria-label="Öka">+</button></div>
-    <div class="quick">${[2, 4, 6, 8, 10].map(v => `<button data-act="hSet" data-v="${v}" class="${num(rd.hours) === v ? 'sel' : ''}">${v}</button>`).join('')}</div>
-    ${cat && cat.addons.length ? `<div class="lbl">Tillägg och utrustning</div><div class="chips" id="addonChips">${cat.addons.map(x => `<button class="chip ${x.id in rd.addons ? 'sel' : ''}" data-act="addon" data-v="${x.id}">${esc(x.name)}</button>`).join('')}</div>
-    <div class="qtys">${cat.addons.filter(x => x.unit && x.id in rd.addons).map(x => `<div class="qty"><span>${esc(x.name)}</span><input type="number" inputmode="decimal" step="0.5" min="0" data-q="${x.id}" value="${rd.addons[x.id]}"><em>${x.unit}</em></div>`).join('')}</div>` : ''}
-    ${cat && cat.km ? `<div class="lbl">Körjournal</div><div class="grid2"><input type="text" data-km="from" placeholder="Från" value="${esc(rd.km.from)}"><input type="text" data-km="to" placeholder="Till" value="${esc(rd.km.to)}"></div><div class="qty"><span>Körda km</span><input type="number" inputmode="decimal" data-km="km" value="${esc(rd.km.km)}" placeholder="0"><em>km</em></div>` : ''}
+function sheetRow() {
+  const cat = catById(rd.categoryId) || { name: (db.rows.find(r => r.id === rd.id) || {}).catName || 'Rad', icon: '⏱️', addons: [], km: false };
+  const ordered = addonOrder(cat), top = ordered.slice(0, 4);
+  const shown = sheetAll ? ordered : ordered.filter(x => top.includes(x) || x.id in rd.addons);
+  const day = getDay(cur);
+  return `${head(esc(cat.icon), esc(cat.name), `${esc(rd.project)} · ${fmtDate(cur)}`)}
+  <div class="bighours"><button class="pm" data-act="hMinus" aria-label="Minska">−</button><div><b id="hOut">${h(rd.hours)}</b><span>timmar</span></div><button class="pm" data-act="hPlus" aria-label="Öka">+</button></div>
+  <div class="quick">${[4, 6, 8, 10].map(v => `<button data-act="hSet" data-v="${v}" class="${num(rd.hours) === v ? 'sel' : ''}">${v}</button>`).join('')}</div>
+  ${cat.addons.length ? `<div class="chips" id="addonChips">${shown.map(x => `<button class="chip ${x.id in rd.addons ? 'sel' : ''}" data-act="addon" data-v="${x.id}">${esc(x.name)}</button>`).join('')}${!sheetAll && ordered.length > shown.length ? `<button class="chip more" data-act="allAddons">Fler…</button>` : ''}</div>
+  <div class="qtys">${cat.addons.filter(x => x.unit && x.id in rd.addons).map(x => `<div class="qty"><span>${esc(x.name)}</span><input type="number" inputmode="decimal" step="0.5" min="0" data-q="${x.id}" value="${rd.addons[x.id]}"><em>${x.unit}</em></div>`).join('')}</div>` : ''}
+  <details id="more" ${sheetMore ? 'open' : ''}><summary>Mer${rd.imageIds.length ? ` · 📷${rd.imageIds.length}` : ''}${rd.note ? ' · ✎' : ''}</summary>
     <label>Projekt<select id="fProject">${projOptions(rd.project)}</select></label>
-    <details id="more" ${moreOpen ? 'open' : ''}><summary>Mer: arbetsorder, material, anteckning, bilder${rd.imageIds.length ? ` (📷${rd.imageIds.length})` : ''}</summary>
-      <label>Arbetsorder / märkning<input type="text" id="fWo" value="${esc(rd.wo)}" placeholder="t.ex. AO-nummer"></label>
-      <div class="lbl">Material / förbrukning</div>
-      <div id="matList">${rd.materials.map((m, i) => `<div class="qty"><span>${esc(m.name)}</span><input type="number" inputmode="decimal" data-mat="${i}" value="${esc(m.qty)}"><em>${esc(m.unit)}</em><button class="secondary" style="margin:0;min-width:46px;min-height:46px;width:auto" data-act="matDel" data-v="${i}" aria-label="Ta bort">✕</button></div>`).join('')}</div>
-      <div class="chips" style="margin-top:8px">${S().materials.map((m, i) => `<button class="chip" data-act="matAdd" data-v="${i}">+ ${esc(m.name)}</button>`).join('')}</div>
-      <label>Anteckning<textarea id="fNote" rows="2" placeholder="Vad gjordes?">${esc(rd.note)}</textarea></label>
-      ${photoWidget('row', rd.imageIds)}
-    </details>
-    <button class="primary" data-act="rowSave" id="saveBtn">${rd.id ? 'Spara ändring' : `Spara ${h(rd.hours)} h ${cat ? esc(cat.name.toLowerCase()) : ''}`}</button>
-    ${rd.id ? '<button class="ghost" data-act="rowCancel">Avbryt</button>' : ''}
-  </div>`;
+    ${cat.km ? `<div class="lbl">Körjournal</div><div class="grid2"><input type="text" data-km="from" placeholder="Från" value="${esc(rd.km.from)}"><input type="text" data-km="to" placeholder="Till" value="${esc(rd.km.to)}"></div><div class="qty"><span>Körda km</span><input type="number" inputmode="decimal" data-km="km" value="${esc(rd.km.km)}" placeholder="0"><em>km</em></div>` : ''}
+    <label>Anteckning<textarea id="fNote" rows="2" placeholder="Vad gjordes? (🎤 på tangentbordet)">${esc(rd.note)}</textarea></label>
+    ${photoWidget('row', rd.imageIds)}
+    <label>Arbetsorder<input type="text" id="fWo" value="${esc(rd.wo)}" placeholder="AO-nummer"></label>
+    <div class="lbl">Material</div>
+    <div id="matList">${rd.materials.map((m, i) => `<div class="qty"><span>${esc(m.name)}</span><input type="number" inputmode="decimal" data-mat="${i}" value="${esc(m.qty)}"><em>${esc(m.unit)}</em><button class="mini" data-act="matDel" data-v="${i}" aria-label="Ta bort">✕</button></div>`).join('')}</div>
+    <div class="chips">${S().materials.map((m, i) => `<button class="chip" data-act="matAdd" data-v="${i}">+ ${esc(m.name)}</button>`).join('')}</div>
+    <div class="lbl">Plats (för hela dagen)</div>
+    <div class="row"><input type="text" id="dPlace" placeholder="Plats" value="${esc(day.place || '')}"><button class="mini wide" data-act="gps" aria-label="Hämta GPS">📍</button></div>
+    ${day.gps ? `<small class="muted">📍 ${day.gps.lat.toFixed(5)}, ${day.gps.lng.toFixed(5)}</small>` : ''}
+  </details>
+  <button class="primary" data-act="rowSave" id="saveBtn">Spara</button>
+  ${rd.id ? '<button class="del" data-act="rowDel" id="rowDel">Ta bort raden</button>' : ''}`;
 }
-function updateSaveLabel() { const c = catById(rd.categoryId); if (!rd.id && $('#saveBtn')) $('#saveBtn').textContent = `Spara ${h(rd.hours)} h ${c ? c.name.toLowerCase() : ''}`; $$('#rowForm .quick button').forEach(b => b.classList.toggle('sel', num(b.dataset.v) === num(rd.hours))); }
-function setHours(v) { rd.hours = Math.max(0, Math.min(24, Math.round(num(v) * 2) / 2)); const i = $('#fHours'); if (i) i.value = rd.hours; updateSaveLabel(); }
-function goDate(d) { cur = d; rd = null; renderReg(); }
+function setHours(v) { rd.hours = Math.max(0, Math.min(24, Math.round(num(v) * 2) / 2)); $('#hOut').textContent = h(rd.hours); $$('#sheetBody .quick button').forEach(b => b.classList.toggle('sel', num(b.dataset.v) === rd.hours)); }
 function saveRow() {
-  const cat = catById(rd.categoryId);
-  if (!cat) return toast('Välj resurs');
+  const cat = catById(rd.categoryId), old = rd.id && db.rows.find(r => r.id === rd.id);
   if (!(num(rd.hours) > 0)) return toast('Ange timmar');
-  const addons = cat.addons.filter(x => x.id in rd.addons).map(x => ({ id: x.id, name: x.name, unit: x.unit, qty: x.unit ? num(rd.addons[x.id]) : 1, price: x.price }));
-  const km = cat.km && (rd.km.km || rd.km.from || rd.km.to) ? { km: num(rd.km.km), from: rd.km.from.trim(), to: rd.km.to.trim() } : null;
-  const data = { date: cur, project: rd.project, wo: rd.wo.trim(), categoryId: cat.id, catName: cat.name, catIcon: cat.icon, hours: num(rd.hours), addons, km, materials: rd.materials.filter(m => num(m.qty) > 0).map(m => ({ ...m, qty: num(m.qty) })), note: rd.note.trim(), imageIds: rd.imageIds };
-  if (rd.id) { Object.assign(db.rows.find(r => r.id === rd.id), data, { updated: Date.now() }); toast('Ändring sparad ✓'); }
-  else { db.rows.push({ id: uid(), created: Date.now(), ...data }); toast(`Sparat: ${h(data.hours)} h ${cat.name.toLowerCase()} ✓`); }
-  S().lastCat = cat.id;
-  if (getDay(cur).breakMin === undefined) setDay(cur, { breakMin: num(S().defBreak) });
-  save(); rd = null; moreOpen = false; renderReg();
-}
-function copyPrev() {
-  const prev = [...new Set(db.rows.map(r => r.date))].filter(d => d < cur).sort().pop();
-  if (!prev) return toast('Hittar ingen tidigare dag att kopiera');
-  const t = Date.now();
-  dayRows(prev).forEach((r, i) => db.rows.push({ ...clone(r), id: uid(), date: cur, imageIds: [], created: t + i }));
-  const pd = getDay(prev); setDay(cur, { place: pd.place || '', breakMin: pd.breakMin ?? S().defBreak, gps: pd.gps || null });
-  save(); rd = null; renderReg(); toast(`Kopierade ${dayRows(cur).length} rader från ${fmtDate(prev)}`);
+  const addons = cat ? cat.addons.filter(x => x.id in rd.addons).map(x => ({ id: x.id, name: x.name, unit: x.unit, qty: x.unit ? num(rd.addons[x.id]) : 1, price: x.price })) : (old ? old.addons : []);
+  const km = cat && cat.km && (rd.km.km || rd.km.from || rd.km.to) ? { km: num(rd.km.km), from: rd.km.from.trim(), to: rd.km.to.trim() } : null;
+  const data = { date: cur, project: rd.project, wo: rd.wo.trim(), categoryId: cat ? cat.id : old.categoryId, catName: cat ? cat.name : old.catName, catIcon: cat ? cat.icon : old.catIcon, hours: num(rd.hours), addons, km, materials: rd.materials.filter(m => num(m.qty) > 0).map(m => ({ ...m, qty: num(m.qty) })), note: rd.note.trim(), imageIds: rd.imageIds };
+  if (old) Object.assign(old, data, { updated: Date.now() }); else db.rows.push({ id: uid(), created: Date.now(), ...data });
+  if (cat) S().lastCat = cat.id;
+  if (getDay(cur).breakMin === undefined) db.days[cur] = { ...getDay(cur), breakMin: num(S().defBreak) };
+  save(); undoIds = null; closeSheet(); renderToday(); toast(`Sparat ${h(data.hours)} h ✓`);
 }
 
-/* ================= Signatur ================= */
-let sigCtx = null, sigDrawn = false;
-function openSig() {
-  $('#sigDate').textContent = `${dayName(cur)} ${cur}`; $('#sigName').value = getDay(cur).sigName || S().name || '';
-  const c = $('#sigCanvas'); sigCtx = c.getContext('2d'); sigCtx.clearRect(0, 0, c.width, c.height); sigCtx.lineWidth = 5; sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round'; sigCtx.strokeStyle = '#111'; sigDrawn = false;
-  $('#sigModal').classList.remove('hidden');
-}
-(() => {
-  const c = $('#sigCanvas'); let drawing = false;
-  const pt = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height]; };
-  c.addEventListener('pointerdown', e => { drawing = true; c.setPointerCapture(e.pointerId); const [x, y] = pt(e); sigCtx.beginPath(); sigCtx.moveTo(x, y); sigCtx.lineTo(x + .1, y); sigCtx.stroke(); sigDrawn = true; });
-  c.addEventListener('pointermove', e => { if (!drawing) return; const [x, y] = pt(e); sigCtx.lineTo(x, y); sigCtx.stroke(); });
-  ['pointerup', 'pointercancel'].forEach(ev => c.addEventListener(ev, () => drawing = false));
-  $('#sigClear').onclick = () => { sigCtx.clearRect(0, 0, c.width, c.height); sigDrawn = false; };
-  $('#sigCancel').onclick = () => $('#sigModal').classList.add('hidden');
-  $('#sigSave').onclick = () => { if (!sigDrawn) return toast('Skriv din signatur först'); setDay(cur, { signature: c.toDataURL('image/png'), sigName: $('#sigName').value.trim(), signedAt: Date.now() }); $('#sigModal').classList.add('hidden'); renderReg(); toast('Dagen signerad ✓'); };
-})();
-
-/* ================= Avvikelser ================= */
-let dv = null, devFilter = 'all';
-const newDev = () => ({ id: null, date: today(), project: lastProjectFor(today()), type: 'sakerhet', desc: '', hours: '', status: 'open', imageIds: [] });
-function renderDev() {
-  if (!dv) dv = newDev();
-  const list = db.devs.filter(x => devFilter === 'all' || x.status === devFilter).sort((x, y) => y.date.localeCompare(x.date) || y.created - x.created);
-  $('#view-dev').innerHTML = `
-  <div class="card" id="devForm">
-    <h2>${dv.id ? 'Redigera avvikelse' : 'Ny avvikelse'}</h2>
-    <div class="cats">${DEV_TYPES.map(([k, n, i]) => `<button class="cat ${dv.type === k ? 'sel' : ''}" data-act="devType" data-v="${k}"><i>${i}</i>${n}</button>`).join('')}</div>
-    <label>Beskrivning<textarea id="dvDesc" rows="3" placeholder="Vad hände?">${esc(dv.desc)}</textarea></label>
-    <div class="grid2"><label>Datum<input type="date" id="dvDate" value="${dv.date}"></label><label>Påverkade timmar<input type="number" inputmode="decimal" step="0.5" id="dvHours" value="${esc(dv.hours)}" placeholder="0"></label></div>
+/* ---- avvikelse / ÄTA ---- */
+const newDev = () => ({ id: null, date: cur, project: lastProjectFor(cur), type: 'ovrigt', desc: '', hours: '', status: 'open', imageIds: [] });
+function sheetDev() {
+  return `${head('⚠️', dv.id ? 'Ändra avvikelse' : 'Avvikelse', fmtDate(dv.date))}
+  <textarea id="dvDesc" rows="4" placeholder="Vad hände? Tryck 🎤 på tangentbordet för att prata.">${esc(dv.desc)}</textarea>
+  ${photoWidget('dev', dv.imageIds)}
+  <details id="more" ${sheetMore ? 'open' : ''}><summary>Mer (typ, timmar, status)</summary>
+    <div class="chips">${DEV_TYPES.map(([k, n, i]) => `<button class="chip ${dv.type === k ? 'sel' : ''}" data-act="devType" data-v="${k}">${i} ${n}</button>`).join('')}</div>
+    <div class="grid2"><label>Påverkade timmar<input type="number" inputmode="decimal" step="0.5" id="dvHours" value="${esc(dv.hours)}" placeholder="0"></label><label>Datum<input type="date" id="dvDate" value="${dv.date}"></label></div>
     <label>Projekt<select id="dvProject">${projOptions(dv.project)}</select></label>
-    <div class="lbl">Status</div>
     <div class="seg"><button data-act="devStatus" data-v="open" class="${dv.status === 'open' ? 'on' : ''}">Öppen</button><button data-act="devStatus" data-v="fixed" class="${dv.status === 'fixed' ? 'on' : ''}">Åtgärdad</button></div>
-    ${photoWidget('dev', dv.imageIds)}
-    <button class="primary" data-act="devSave" id="devSave">${dv.id ? 'Spara ändring' : 'Spara avvikelse'}</button>
-    ${dv.id ? '<button class="ghost" data-act="devCancel">Avbryt</button>' : ''}
-  </div>
-  <div class="card"><h2>Avvikelser</h2>
-    <div class="seg">${[['all', 'Alla'], ['open', 'Öppna'], ['fixed', 'Åtgärdade']].map(([k, n]) => `<button data-act="devFilter" data-v="${k}" class="${devFilter === k ? 'on' : ''}">${n}</button>`).join('')}</div>
-    <ul class="list" id="devList">${list.map(x => { const t = devType(x.type); return `<li data-id="${x.id}"><div class="ic">${t[2]}</div><div class="info"><b>${t[1]} <span class="badge ${x.status}">${x.status === 'open' ? 'Öppen' : 'Åtgärdad'}</span></b><small>${fmtDate(x.date)} · ${esc(x.project)}${x.hours ? ` · ${h(x.hours)} h` : ''}${x.imageIds?.length ? ` · 📷${x.imageIds.length}` : ''}</small><small>${esc(x.desc)}</small>${x.imageIds?.length ? `<div class="photos">${thumbsHtml(x.imageIds)}</div>` : ''}</div><div class="act" style="flex-direction:column"><button data-act="devToggle" aria-label="Växla status">${x.status === 'open' ? '✓' : '↺'}</button><button data-act="devEdit" aria-label="Redigera">✎</button><button data-act="devDel" aria-label="Radera">🗑</button></div></li>`; }).join('') || '<li class="empty">Inga avvikelser.</li>'}</ul>
-  </div>`;
+  </details>
+  <button class="primary" data-act="devSave" id="devSave">Spara</button>
+  ${dv.id ? '<button class="del" data-act="devDel">Ta bort</button>' : ''}`;
 }
 function saveDev() {
-  if (!dv.desc.trim()) return toast('Skriv en beskrivning');
-  const data = { date: dv.date || today(), project: dv.project, type: dv.type, desc: dv.desc.trim(), hours: num(dv.hours), status: dv.status, imageIds: dv.imageIds };
+  if (!dv.desc.trim() && !dv.imageIds.length) return toast('Skriv något eller ta en bild');
+  const data = { date: dv.date || cur, project: dv.project, type: dv.type, desc: dv.desc.trim(), hours: num(dv.hours), status: dv.status, imageIds: dv.imageIds };
   if (dv.id) Object.assign(db.devs.find(x => x.id === dv.id), data, { updated: Date.now() }); else db.devs.push({ id: uid(), created: Date.now(), ...data });
-  save(); dv = null; renderDev(); toast('Avvikelse sparad ✓');
+  save(); closeSheet(); renderView(); toast('Avvikelse sparad ✓');
 }
-
-/* ================= ÄTA ================= */
-let at = null;
-const newAta = () => ({ id: null, date: today(), project: lastProjectFor(today()), desc: '', orderedBy: '', hours: '', categoryId: (catById(S().lastCat) || S().categories[0] || {}).id || '', material: '', amount: '', status: 'beordrad', imageIds: [] });
-function renderAta() {
-  if (!at) at = newAta();
-  const list = [...db.atas].sort((x, y) => y.date.localeCompare(x.date) || y.created - x.created);
-  $('#view-ata').innerHTML = `
-  <div class="card" id="ataForm">
-    <h2>${at.id ? `Redigera ÄTA ${at.nr || ''}` : 'Nytt ÄTA-arbete'}</h2>
-    <p class="muted small" style="margin:-6px 0 4px">Ändrings- och tilläggsarbete utöver avtalet.</p>
-    <label>Beskrivning<textarea id="atDesc" rows="3" placeholder="Vad ska göras / gjordes?">${esc(at.desc)}</textarea></label>
-    <label>Beordrad av<input type="text" id="atBy" value="${esc(at.orderedBy)}" placeholder="Namn / roll hos beställaren"></label>
-    <div class="grid2"><label>Datum<input type="date" id="atDate" value="${at.date}"></label><label>Timmar<input type="number" inputmode="decimal" step="0.5" id="atHours" value="${esc(at.hours)}" placeholder="0"></label></div>
-    <div class="lbl">Resurs</div>
-    <div class="cats">${S().categories.map(c => `<button class="cat ${c.id === at.categoryId ? 'sel' : ''}" data-act="ataCat" data-v="${c.id}"><i>${esc(c.icon)}</i>${esc(c.name)}</button>`).join('')}</div>
+const newAta = () => ({ id: null, date: cur, project: lastProjectFor(cur), desc: '', orderedBy: '', hours: '', categoryId: (dayRows(cur).slice(-1)[0] || {}).categoryId || (catById(S().lastCat) || {}).id || '', material: '', amount: '', status: 'beordrad', imageIds: [] });
+function sheetAta() {
+  return `${head('➕', at.id ? `Ändra ÄTA ${at.nr || ''}` : 'ÄTA – extra arbete', fmtDate(at.date))}
+  <textarea id="atDesc" rows="4" placeholder="Vad ska göras / gjordes? Tryck 🎤 för att prata.">${esc(at.desc)}</textarea>
+  <input type="text" id="atBy" value="${esc(at.orderedBy)}" placeholder="Vem beställde? (valfritt)">
+  ${photoWidget('ata', at.imageIds)}
+  <details id="more" ${sheetMore ? 'open' : ''}><summary>Mer (timmar, status, belopp)</summary>
+    <div class="grid2"><label>Timmar<input type="number" inputmode="decimal" step="0.5" id="atHours" value="${esc(at.hours)}" placeholder="0"></label><label>Datum<input type="date" id="atDate" value="${at.date}"></label></div>
+    <label>Resurs<select id="atCat"><option value="">–</option>${S().categories.map(c => `<option value="${c.id}"${c.id === at.categoryId ? ' selected' : ''}>${esc(c.icon)} ${esc(c.name)}</option>`).join('')}</select></label>
     <label>Projekt<select id="atProject">${projOptions(at.project)}</select></label>
-    <label>Material<textarea id="atMat" rows="2" placeholder="t.ex. 12 ton makadam, 40 m kabel">${esc(at.material)}</textarea></label>
-    <label>Belopp (kr, valfritt)<input type="number" inputmode="decimal" id="atAmount" value="${esc(at.amount)}" placeholder="Räknas annars på timpris"></label>
-    <div class="lbl">Status</div>
+    <label>Material<input type="text" id="atMat" value="${esc(at.material)}" placeholder="t.ex. 6 ton makadam"></label>
+    <label>Belopp kr<input type="number" inputmode="decimal" id="atAmount" value="${esc(at.amount)}" placeholder="annars timpris"></label>
     <div class="seg">${ATA_STATUS.map(([k, n]) => `<button data-act="ataStatus" data-v="${k}" class="${at.status === k ? 'on' : ''}">${n}</button>`).join('')}</div>
-    ${photoWidget('ata', at.imageIds)}
-    <button class="primary" data-act="ataSave" id="ataSave">${at.id ? 'Spara ändring' : 'Spara ÄTA'}</button>
-    ${at.id ? '<button class="ghost" data-act="ataCancel">Avbryt</button>' : ''}
-  </div>
-  <div class="card"><h2>ÄTA-lista</h2>
-    <ul class="list" id="ataList">${list.map(x => { const c = catById(x.categoryId); return `<li data-id="${x.id}"><div class="ic">${c ? esc(c.icon) : '✚'}</div><div class="info"><b>ÄTA ${x.nr} <span class="badge ${x.status}">${statusLbl(x.status)}</span></b><small>${fmtDate(x.date)} · ${esc(x.project)}${x.hours ? ` · ${h(x.hours)} h` : ''}${x.orderedBy ? ` · beordrad av ${esc(x.orderedBy)}` : ''}</small><small>${esc(x.desc)}</small>${x.imageIds?.length ? `<div class="photos">${thumbsHtml(x.imageIds)}</div>` : ''}</div><div class="act" style="flex-direction:column"><button data-act="ataNext" aria-label="Nästa status">➜</button><button data-act="ataEdit" aria-label="Redigera">✎</button><button data-act="ataDel" aria-label="Radera">🗑</button></div></li>`; }).join('') || '<li class="empty">Inga ÄTA-arbeten.</li>'}</ul>
-  </div>`;
+  </details>
+  <button class="primary" data-act="ataSave" id="ataSave">Spara</button>
+  ${at.id ? '<button class="del" data-act="ataDel">Ta bort</button>' : ''}`;
 }
 function saveAta() {
-  if (!at.desc.trim()) return toast('Skriv en beskrivning');
+  if (!at.desc.trim() && !at.imageIds.length) return toast('Skriv något eller ta en bild');
   const c = catById(at.categoryId);
-  const data = { date: at.date || today(), project: at.project, desc: at.desc.trim(), orderedBy: at.orderedBy.trim(), hours: num(at.hours), categoryId: at.categoryId, catName: c ? c.name : '', material: at.material.trim(), amount: at.amount === '' ? '' : num(at.amount), status: at.status, imageIds: at.imageIds };
+  const data = { date: at.date || cur, project: at.project, desc: at.desc.trim(), orderedBy: at.orderedBy.trim(), hours: num(at.hours), categoryId: at.categoryId, catName: c ? c.name : '', material: at.material.trim(), amount: at.amount === '' ? '' : num(at.amount), status: at.status, imageIds: at.imageIds };
   if (at.id) Object.assign(db.atas.find(x => x.id === at.id), data, { updated: Date.now() });
   else db.atas.push({ id: uid(), nr: db.atas.reduce((m, x) => Math.max(m, x.nr || 0), 0) + 1, created: Date.now(), ...data });
-  save(); at = null; renderAta(); toast('ÄTA sparad ✓');
+  save(); closeSheet(); renderView(); toast('ÄTA sparad ✓');
 }
 
-/* ================= Dagar ================= */
-let daysQ = '';
-function renderDays() {
-  const dates = [...new Set([...db.rows.map(r => r.date), ...Object.keys(db.days).filter(d => db.days[d].signature)])].sort().reverse();
-  const q = daysQ.toLowerCase();
-  const items = dates.filter(d => !q || [d, fmtDate(d), getDay(d).place, ...dayRows(d).map(r => [r.project, r.catName, r.note, addonText(r)].join(' '))].join(' ').toLowerCase().includes(q));
-  const lim = num(S().otLimit) || 8;
-  $('#view-days').innerHTML = `<div class="card"><h2>Registrerade dagar</h2><input type="search" id="daysQ" placeholder="Sök projekt, plats, resurs…" value="${esc(daysQ)}">
-  <ul class="list">${items.map(d => { const rs = dayRows(d), t = dayTotal(d), nd = db.devs.filter(x => x.date === d).length, na = db.atas.filter(x => x.date === d).length; return `<li data-date="${d}" data-act="openDay" style="cursor:pointer"><div class="info"><b>${fmtDate(d)} <span class="muted small">v ${isoWeek(parse(d)).week}</span>${getDay(d).signature ? ' ✍️' : ''}</b><small>${[...new Set(rs.map(r => r.catIcon))].join(' ')} ${esc([...new Set(rs.map(r => r.project))].join(', '))}${getDay(d).place ? ' · ' + esc(getDay(d).place) : ''}${nd ? ` · ⚠${nd}` : ''}${na ? ` · ÄTA ${na}` : ''}</small></div><div class="h ${t > lim ? 'ot' : ''}">${h(t)}</div></li>`; }).join('') || '<li class="empty">Inget registrerat än.</li>'}</ul></div>`;
+/* ================= Vecka ================= */
+function renderWeek() {
+  const r = range(), R = report(r.from, r.to), lim = R.lim;
+  const dates = []; for (let d = r.from; d <= r.to; d = ymd(addDays(d, 1))) dates.push(d);
+  const shownDates = repMode === 'week' ? dates : dates.filter(d => dayTotal(d) > 0);
+  $('#view-week').innerHTML = `
+  <div class="seg small"><button data-act="repMode" data-v="week" class="${repMode === 'week' ? 'on' : ''}">Vecka</button><button data-act="repMode" data-v="month" class="${repMode === 'month' ? 'on' : ''}">Månad</button></div>
+  <div class="dhead"><button class="nb" data-act="repPrev" aria-label="Föregående">‹</button><div class="dl"><b id="repLabel">${r.label}</b><span>${r.sub}</span></div><button class="nb" data-act="repNext" aria-label="Nästa">›</button></div>
+  <div class="bigtot"><b id="repTotal">${h(R.total)}</b><span>timmar</span>${R.ot ? `<em class="ot" id="repOt">varav ${h(R.ot)} h övertid</em>` : '<em id="repOt"></em>'}</div>
+  <ul class="week">${shownDates.map(d => { const t = dayTotal(d); return `<li><button data-act="openDay" data-v="${d}"><span>${dayName(d).slice(0, 3)} ${parse(d).getDate()}/${parse(d).getMonth() + 1}</span><small>${esc([...new Set(dayRows(d).map(r => r.catIcon + ' ' + r.catName))].join(', '))}</small><b class="${t > lim ? 'ot' : ''}">${t ? h(t) : '–'}</b></button></li>`; }).join('') || '<li class="empty">Inga timmar.</li>'}</ul>
+  <button class="primary" data-act="print" id="printBtn">📄 Spara PDF</button>
+  <button class="secondary" data-act="share" id="shareBtn">📤 Dela</button>
+  ${R.devs.length || R.atas.length ? `<div class="sect">Avvikelser och ÄTA</div><ul class="rows">${R.devs.map(x => `<li><button class="rowbtn" data-act="devEdit" data-v="${x.id}"><i>⚠️</i><span><b>${fmtDate(x.date)} · ${x.status === 'open' ? 'Öppen' : 'Åtgärdad'}</b><small>${esc(x.desc)}</small></span></button></li>`).join('')}${R.atas.map(x => `<li><button class="rowbtn" data-act="ataEdit" data-v="${x.id}"><i>➕</i><span><b>ÄTA ${x.nr} · ${statusLbl(x.status)}</b><small>${esc(x.desc)}</small></span><em>${x.hours ? h(x.hours) : ''}</em></button></li>`).join('')}</ul>` : ''}
+  ${R.cats.length ? `<details><summary>Detaljer per maskin och tillägg</summary>${catTable(R, R.amount > 0 || R.ataSum > 0)}${R.km ? `<p>Körda km: <b>${h(R.km)}</b></p>` : ''}${R.mats.length ? `<table><tbody>${R.mats.map(m => `<tr><td>${esc(m.name)}</td><td class="n">${h(m.qty)} ${esc(m.unit)}</td></tr>`).join('')}</tbody></table>` : ''}</details>` : ''}`;
+}
+function shareText(r, R) {
+  return `${r.title}\n${S().name ? S().name + ', ' : ''}${S().company}\nTotalt ${h(R.total)} h${R.ot ? ` (varav övertid ${h(R.ot)} h)` : ''}\n\n` +
+    R.perDay.map(d => `${dayName(d.date).slice(0, 3)} ${d.date}: ${h(d.total)} h – ${[...new Set(R.rows.filter(x => x.date === d.date).map(x => x.catName + (x.addons.length ? ` (${addonText(x)})` : '')))].join(', ')}`).join('\n') +
+    (R.devs.length ? `\n\nAvvikelser: ${R.devs.length}` : '') + (R.atas.length ? `\nÄTA: ${R.atas.map(x => `ÄTA ${x.nr} ${x.desc}`).join('; ')}` : '');
+}
+async function share() {
+  const r = range(), R = report(r.from, r.to), text = shareText(r, R);
+  try {
+    const file = new File([toCSV(r.from, r.to)], `tidrapport-${r.from}.csv`, { type: 'text/csv' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ title: r.title, text, files: [file] });
+    else if (navigator.share) await navigator.share({ title: r.title, text });
+    else { await navigator.clipboard.writeText(text); toast('Kopierat – klistra in i sms/mejl'); }
+  } catch (e) { if (e.name !== 'AbortError') { try { await navigator.clipboard.writeText(text); toast('Kopierat – klistra in i sms/mejl'); } catch (e2) { toast('Kunde inte dela'); } } }
 }
 
+/* ================= Första start ================= */
+function renderSetup() {
+  $('#setup').innerHTML = `<div class="setupbox"><div class="logo big">${esc(S().company || 'Tidrapport')}</div><h1>Välkommen!</h1><p>Två saker, sen är du igång.</p>
+  <label>Ditt namn<input type="text" id="suName" value="${esc(S().name)}" autocomplete="name"></label>
+  <label>Projekt du jobbar på<input type="text" id="suProj" value="${esc(S().defaultProject === 'Allmänt' ? '' : S().defaultProject)}" placeholder="t.ex. Ledningsbygge"></label>
+  <button class="primary" data-act="setupDone" id="setupBtn">Kom igång</button></div>`;
+  $('#setup').classList.remove('hidden');
+}
+function finishSetup() {
+  const n = $('#suName').value.trim(), p = $('#suProj').value.trim();
+  S().name = n; if (p) { if (!S().projects.includes(p)) S().projects.unshift(p); S().defaultProject = p; }
+  S().setupDone = true; save(); $('#setup').classList.add('hidden'); renderHeader(); renderView();
+}
 /* ================= Rapporter ================= */
 let repMode = 'week', wk = isoWeek(new Date()), mo = { y: new Date().getFullYear(), m: new Date().getMonth() };
 function range() {
@@ -366,20 +390,6 @@ function report(from, to) {
 function catTable(R, money) {
   return `<table><thead><tr><th>Resurs / tillägg</th><th class="n">Antal</th><th class="n">Timmar</th>${money ? '<th class="n">Belopp</th>' : ''}</tr></thead><tbody>${R.cats.map(c => `<tr><td><b>${esc(c.icon || '')} ${esc(c.name)}</b></td><td></td><td class="n"><b>${h(c.hours)}</b></td>${money ? `<td class="n"><b>${kr.format(c.amount)}</b></td>` : ''}</tr>${Object.values(c.addons).map(A => `<tr><td style="padding-left:22px">${esc(A.name)}</td><td class="n">${A.count} ggr</td><td class="n">${A.unit ? `${h(A.qty)} ${A.unit}` : ''}</td>${money ? `<td class="n">${A.amount ? kr.format(A.amount) : ''}</td>` : ''}</tr>`).join('')}`).join('')}<tr class="tot"><td>Totalt</td><td></td><td class="n">${h(R.total)}</td>${money ? `<td class="n">${kr.format(R.amount)}</td>` : ''}</tr></tbody></table>`;
 }
-function renderRep() {
-  const r = range(), R = report(r.from, r.to), money = R.amount > 0 || R.ataSum > 0;
-  $('#view-rep').innerHTML = `<div class="card">
-    <div class="seg"><button data-act="repMode" data-v="week" class="${repMode === 'week' ? 'on' : ''}">Vecka</button><button data-act="repMode" data-v="month" class="${repMode === 'month' ? 'on' : ''}">Månad</button></div>
-    <div class="nav"><button class="big" data-act="repPrev" aria-label="Föregående">‹</button><div class="navlbl"><div id="repLabel">${r.label}</div><div class="muted">${r.sub}</div></div><button class="big" data-act="repNext" aria-label="Nästa">›</button></div>
-    <div class="kpis"><div class="kpi"><b id="repTotal">${h(R.total)}</b><span>timmar</span></div><div class="kpi"><b id="repOt" class="${R.ot ? 'ot' : ''}">${h(R.ot)}</b><span>övertid</span></div><div class="kpi"><b>${money ? kr.format(R.amount + R.ataSum) : R.perDay.length}</b><span>${money ? 'att fakturera' : 'arbetsdagar'}</span></div></div>
-    <div class="kpis"><div class="kpi"><b>${h(R.km)}</b><span>km</span></div><div class="kpi"><b id="repDev">${R.devs.length}</b><span>avvikelser</span></div><div class="kpi"><b id="repAta">${R.atas.length}</b><span>ÄTA</span></div></div>
-    <h3>Per resurs med tillägg</h3>${R.cats.length ? catTable(R, money) : '<p class="empty">Inga timmar i perioden.</p>'}
-    ${Object.keys(R.proj).length ? `<h3>Per projekt</h3><table><tbody>${Object.entries(R.proj).map(([p, t]) => `<tr><td>${esc(p)}</td><td class="n">${h(t)} h</td></tr>`).join('')}</tbody></table>` : ''}
-    ${R.mats.length ? `<h3>Material / förbrukning</h3><table><tbody>${R.mats.map(m => `<tr><td>${esc(m.name)}</td><td class="n">${h(m.qty)} ${esc(m.unit)}</td></tr>`).join('')}</tbody></table>` : ''}
-    <button class="primary" data-act="print" id="printBtn">${repMode === 'week' ? 'Veckorapport' : 'Månadsrapport'} (skriv ut / PDF)</button>
-    <p class="muted small center">Välj ”Spara som PDF” i utskriftsdialogen.</p>
-  </div>`;
-}
 function printHtml(r, R) {
   const s = S(), money = R.amount > 0 || R.ataSum > 0;
   const th = ids => ids && ids.length ? `<div class="thumbs">${ids.map(id => `<img src="${thumbs.get(id) || ''}" alt="">`).join('')}</div>` : '';
@@ -399,7 +409,7 @@ function printHtml(r, R) {
   ${R.mats.length ? `<h2>Material / förbrukning</h2><table><tbody>${R.mats.map(m => `<tr><td>${esc(m.name)}</td><td class="n">${h(m.qty)} ${esc(m.unit)}</td></tr>`).join('')}</tbody></table>` : ''}
   <h2>Avvikelser (${R.devs.length})</h2>${R.devs.map(x => { const t = devType(x.type); return `<div class="item"><b>${t[1]}</b> · ${x.date} · ${esc(x.project)} · ${x.status === 'open' ? 'Öppen' : 'Åtgärdad'}${x.hours ? ` · påverkade ${h(x.hours)} h` : ''}<div>${esc(x.desc)}</div>${th(x.imageIds)}</div>`; }).join('') || '<p>Inga avvikelser.</p>'}
   <h2>ÄTA-arbeten (${R.atas.length})</h2>${R.atas.map(x => `<div class="item"><b>ÄTA ${x.nr}</b> · ${x.date} · ${esc(x.project)} · <b>${statusLbl(x.status)}</b>${x.orderedBy ? ` · beordrad av ${esc(x.orderedBy)}` : ''}${x.hours ? ` · ${h(x.hours)} h ${esc(x.catName || '')}` : ''}${money ? ` · ${kr.format(ataAmount(x))}` : ''}<div>${esc(x.desc)}</div>${x.material ? `<div><i>Material:</i> ${esc(x.material)}</div>` : ''}${th(x.imageIds)}</div>`).join('') || '<p>Inga ÄTA-arbeten.</p>'}
-  ${R.rows.some(x => x.imageIds?.length) ? `<h2>Bilder från arbetet</h2>${R.rows.filter(x => x.imageIds?.length).map(x => `<div class="item">${x.date} · ${esc(x.catName)} · ${esc(x.project)}${th(x.imageIds)}</div>`).join('')}` : ''}
+  ${R.rows.some(x => x.imageIds?.length) || R.perDay.some(d => d.day.imageIds?.length) ? `<h2>Bilder från arbetet</h2>${R.perDay.filter(d => d.day.imageIds?.length).map(d => `<div class="item">${d.date} · dagens bilder${th(d.day.imageIds)}</div>`).join('')}${R.rows.filter(x => x.imageIds?.length).map(x => `<div class="item">${x.date} · ${esc(x.catName)} · ${esc(x.project)}${th(x.imageIds)}</div>`).join('')}` : ''}
   ${money ? `<h2>Fakturaunderlag</h2><table><tbody><tr><td>Timmar och tillägg</td><td class="n">${kr.format(R.amount)}</td></tr>${R.ataSum ? `<tr><td>ÄTA-arbeten</td><td class="n">${kr.format(R.ataSum)}</td></tr>` : ''}<tr class="tot"><td>Summa exkl. moms</td><td class="n">${kr.format(R.amount + R.ataSum)}</td></tr></tbody></table>` : ''}
   ${sigs.length ? `<h2>Dagsignaturer</h2><div class="sigs">${sigs.map(d => `<div><img src="${d.day.signature}" alt="">${d.date}${d.day.sigName ? ' – ' + esc(d.day.sigName) : ''}</div>`).join('')}</div>` : ''}
   <div class="rep-foot"><div>Signatur</div><div>Godkänd av beställare</div></div>
@@ -458,7 +468,7 @@ function saveSettings() {
   st.materials = st.materials.filter(m => m.name.trim());
   if (!st.projects.length) st.projects = ['Allmänt'];
   if (!st.projects.includes(st.defaultProject)) st.defaultProject = st.projects[0];
-  db.settings = st; save(); st = null; rd = null; at = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
+  db.settings = st; save(); st = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
 }
 
 /* ================= Export ================= */
@@ -466,14 +476,15 @@ function download(name, text, type) {
   const blob = new Blob([text], { type }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
 }
-function toCSV() {
+function toCSV(from = '0000', to = '9999') {
+  const inR = d => d >= from && d <= to;
   const q = v => { v = String(v ?? ''); return /[;"\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
   const dn = v => String(v ?? '').replace('.', ',');
   const out = [['Typ', 'Datum', 'Vecka', 'Projekt', 'Arbetsorder', 'Plats', 'Resurs', 'Timmar', 'Tillägg', 'Km', 'Från', 'Till', 'Material', 'Notering/Beskrivning', 'Status', 'Beordrad av', 'Belopp', 'Bilder']];
   const wkOf = d => { const w = isoWeek(parse(d)); return `${w.year}-V${pad(w.week)}`; };
-  [...db.rows].sort((x, y) => x.date.localeCompare(y.date)).forEach(r => out.push(['Tid', r.date, wkOf(r.date), r.project, r.wo, getDay(r.date).place, r.catName, dn(r.hours), addonText(r), r.km ? dn(r.km.km) : '', r.km?.from, r.km?.to, (r.materials || []).map(m => `${m.name} ${dn(m.qty)} ${m.unit}`).join(', '), r.note, '', '', dn(Math.round(rowAmount(r))), (r.imageIds || []).length]));
-  db.devs.forEach(x => out.push(['Avvikelse', x.date, wkOf(x.date), x.project, '', '', devType(x.type)[1], dn(x.hours), '', '', '', '', '', x.desc, x.status === 'open' ? 'Öppen' : 'Åtgärdad', '', '', (x.imageIds || []).length]));
-  db.atas.forEach(x => out.push([`ÄTA ${x.nr}`, x.date, wkOf(x.date), x.project, '', '', x.catName, dn(x.hours), '', '', '', '', x.material, x.desc, statusLbl(x.status), x.orderedBy, dn(Math.round(ataAmount(x))), (x.imageIds || []).length]));
+  [...db.rows].filter(r => inR(r.date)).sort((x, y) => x.date.localeCompare(y.date)).forEach(r => out.push(['Tid', r.date, wkOf(r.date), r.project, r.wo, getDay(r.date).place, r.catName, dn(r.hours), addonText(r), r.km ? dn(r.km.km) : '', r.km?.from, r.km?.to, (r.materials || []).map(m => `${m.name} ${dn(m.qty)} ${m.unit}`).join(', '), r.note, '', '', dn(Math.round(rowAmount(r))), (r.imageIds || []).length]));
+  db.devs.filter(x => inR(x.date)).forEach(x => out.push(['Avvikelse', x.date, wkOf(x.date), x.project, '', '', devType(x.type)[1], dn(x.hours), '', '', '', '', '', x.desc, x.status === 'open' ? 'Öppen' : 'Åtgärdad', '', '', (x.imageIds || []).length]));
+  db.atas.filter(x => inR(x.date)).forEach(x => out.push([`ÄTA ${x.nr}`, x.date, wkOf(x.date), x.project, '', '', x.catName, dn(x.hours), '', '', '', '', x.material, x.desc, statusLbl(x.status), x.orderedBy, dn(Math.round(ataAmount(x))), (x.imageIds || []).length]));
   return '\uFEFF' + out.map(r => r.map(q).join(';')).join('\r\n');
 }
 async function backup() {
@@ -490,58 +501,59 @@ async function restore(file) {
     else throw new Error('fel format');
     if (!confirm(`Återställ ${nd.rows.length} rader, ${nd.devs.length} avvikelser, ${nd.atas.length} ÄTA och ${imgs.length} bilder? Nuvarande data ersätts.`)) return;
     await IDB.clear(); thumbs.clear(); for (const o of imgs) { await IDB.put(o); thumbs.set(o.id, o.thumb); }
-    db = nd; save(); rd = dv = at = st = null; renderHeader(); renderView(); toast('Backup återställd ✓');
+    closeSheet(); db = nd; save(); st = null; renderHeader(); renderView(); toast('Backup återställd ✓');
   } catch (e) { toast('Ogiltig backupfil'); }
 }
 
 /* ================= Navigering & händelser ================= */
-let view = 'reg';
-const RENDER = { reg: renderReg, days: renderDays, dev: renderDev, ata: renderAta, rep: renderRep, set: renderSet };
-function renderView() { RENDER[view](); }
+let view = 'today';
+const RENDER = { today: renderToday, week: renderWeek, set: renderSet };
+function renderView() { RENDER[view](); if (sheet) renderSheet(); }
 function show(v) {
   view = v; $$('.view').forEach(s => s.classList.toggle('active', s.id === 'view-' + v));
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   if (v === 'set') st = null;
-  renderView(); window.scrollTo(0, 0);
+  if (v === 'week') { wk = isoWeek(parse(cur)); mo = { y: parse(cur).getFullYear(), m: parse(cur).getMonth() }; }
+  RENDER[v](); window.scrollTo(0, 0);
 }
-$$('#tabs button').forEach(b => b.onclick = () => show(b.dataset.v));
-$('#gearBtn').onclick = () => show('set');
-function renderHeader() { $('#logo').textContent = S().company || 'Tidrapport'; $('#topSub').textContent = S().name ? `Tidrapport · ${S().name}` : 'Tidrapport'; document.title = 'Tidrapport'; }
-
+$$('#tabs button').forEach(b => b.onclick = () => { closeSheet(); show(b.dataset.v); });
+function renderHeader() { $('#logo').textContent = S().company || 'Tidrapport'; $('#topSub').textContent = S().name || ''; }
+const byId = (arr, el) => arr.find(x => x.id === el.dataset.v);
 const ACT = {
   dPrev: () => goDate(ymd(addDays(cur, -1))), dNext: () => goDate(ymd(addDays(cur, 1))), dToday: () => goDate(today()),
-  brk: el => { setDay(cur, { breakMin: num(el.dataset.v) }); $$('[data-act=brk]').forEach(b => b.classList.toggle('sel', b === el)); },
+  goDate: el => goDate(el.dataset.v),
+  openDay: el => { cur = el.dataset.v; undoIds = null; show('today'); },
+  copyPrev, undo: () => { db.rows = db.rows.filter(r => !undoIds.includes(r.id)); undoIds = null; save(); renderToday(); toast('Ångrat'); },
+  cat: el => { rd = newRowDraft(el.dataset.v); openSheet('row'); },
+  rowEdit: el => { rd = rowToDraft(byId(db.rows, el)); openSheet('row'); sheetMore = !!(rd.note || rd.materials.length || rd.imageIds.length || rd.wo || rd.km.km); renderSheet(); },
+  rowDel: async () => { const r = db.rows.find(x => x.id === rd.id); if (!confirm(`Ta bort ${h(r.hours)} h ${r.catName}?`)) return; db.rows = db.rows.filter(x => x !== r); save(); await deleteImages(r.imageIds); closeSheet(); renderView(); toast('Borttagen'); },
+  hMinus: () => setHours(num(rd.hours) - 0.5), hPlus: () => setHours(num(rd.hours) + 0.5), hSet: el => setHours(el.dataset.v),
+  addon: el => { const id = el.dataset.v, x = catById(rd.categoryId).addons.find(a => a.id === id); if (id in rd.addons) delete rd.addons[id]; else rd.addons[id] = x.unit === 'h' ? rd.hours : x.unit ? 1 : ''; renderSheet(); },
+  allAddons: () => { sheetAll = true; renderSheet(); },
+  matAdd: el => { const m = S().materials[el.dataset.v]; rd.materials.push({ name: m.name, unit: m.unit, qty: '' }); sheetMore = true; renderSheet(); const ins = $$('[data-mat]'); ins[ins.length - 1]?.focus(); },
+  matDel: el => { rd.materials.splice(+el.dataset.v, 1); renderSheet(); },
+  rowSave: saveRow, close: () => closeSheet(),
   gps: () => {
     if (!navigator.geolocation) return toast('GPS saknas');
     toast('Hämtar position…');
-    navigator.geolocation.getCurrentPosition(p => { const g = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; setDay(cur, { gps: g, place: getDay(cur).place || `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}` }); renderReg(); toast('Position sparad ✓'); }, () => toast('Kunde inte hämta position'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+    navigator.geolocation.getCurrentPosition(p => { const g = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; setDay(cur, { gps: g, place: getDay(cur).place || `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}` }); renderSheet(); toast('Position sparad ✓'); }, () => toast('Kunde inte hämta position'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   },
-  cat: el => { if (rd.categoryId !== el.dataset.v) { rd.categoryId = el.dataset.v; rd.addons = {}; } renderReg(); },
-  hMinus: () => setHours(num(rd.hours) - 0.5), hPlus: () => setHours(num(rd.hours) + 0.5), hSet: el => setHours(el.dataset.v),
-  addon: el => { const id = el.dataset.v, x = catById(rd.categoryId).addons.find(a => a.id === id); if (id in rd.addons) delete rd.addons[id]; else rd.addons[id] = x.unit === 'h' ? rd.hours : x.unit ? 1 : ''; renderReg(); },
-  matAdd: el => { const m = S().materials[el.dataset.v]; rd.materials.push({ name: m.name, unit: m.unit, qty: '' }); moreOpen = true; renderReg(); const ins = $$('[data-mat]'); ins[ins.length - 1]?.focus(); },
-  matDel: el => { rd.materials.splice(+el.dataset.v, 1); renderReg(); },
-  rowSave: saveRow, rowCancel: () => { rd = null; renderReg(); },
-  rowEdit: el => { const r = db.rows.find(x => x.id === el.closest('li').dataset.id); rd = rowToDraft(r); moreOpen = !!(r.note || r.materials?.length || r.imageIds?.length || r.wo); renderReg(); $('#rowForm').scrollIntoView({ behavior: 'smooth' }); },
-  rowDel: async el => { const r = db.rows.find(x => x.id === el.closest('li').dataset.id); if (!confirm(`Radera ${h(r.hours)} h ${r.catName}?`)) return; db.rows = db.rows.filter(x => x !== r); save(); await deleteImages(r.imageIds); if (rd && rd.id === r.id) rd = null; renderReg(); toast('Raderad'); },
-  copyPrev, sign: openSig, sigDel: () => { if (confirm('Ta bort signaturen?')) { setDay(cur, { signature: null, sigName: '' }); renderReg(); } },
+  newDev: () => { dv = newDev(); openSheet('dev'); },
+  devEdit: el => { const x = byId(db.devs, el); dv = { ...clone(x), hours: x.hours || '' }; openSheet('dev'); },
   devType: el => { dv.type = el.dataset.v; $$('[data-act=devType]').forEach(b => b.classList.toggle('sel', b === el)); },
   devStatus: el => { dv.status = el.dataset.v; $$('[data-act=devStatus]').forEach(b => b.classList.toggle('on', b === el)); },
-  devSave: saveDev, devCancel: () => { dv = null; renderDev(); }, devFilter: el => { devFilter = el.dataset.v; renderDev(); },
-  devToggle: el => { const x = db.devs.find(d => d.id === el.closest('li').dataset.id); x.status = x.status === 'open' ? 'fixed' : 'open'; save(); renderDev(); },
-  devEdit: el => { const x = db.devs.find(d => d.id === el.closest('li').dataset.id); dv = { ...clone(x), hours: x.hours || '' }; renderDev(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
-  devDel: async el => { const x = db.devs.find(d => d.id === el.closest('li').dataset.id); if (!confirm('Radera avvikelsen?')) return; db.devs = db.devs.filter(d => d !== x); save(); await deleteImages(x.imageIds); renderDev(); toast('Raderad'); },
-  ataCat: el => { at.categoryId = el.dataset.v; $$('[data-act=ataCat]').forEach(b => b.classList.toggle('sel', b === el)); },
+  devSave: saveDev,
+  devDel: async () => { const x = db.devs.find(d => d.id === dv.id); if (!confirm('Ta bort avvikelsen?')) return; db.devs = db.devs.filter(d => d !== x); save(); await deleteImages(x.imageIds); closeSheet(); renderView(); toast('Borttagen'); },
+  newAta: () => { at = newAta(); openSheet('ata'); },
+  ataEdit: el => { const x = byId(db.atas, el); at = { ...clone(x), hours: x.hours || '', amount: x.amount ?? '' }; openSheet('ata'); },
   ataStatus: el => { at.status = el.dataset.v; $$('[data-act=ataStatus]').forEach(b => b.classList.toggle('on', b === el)); },
-  ataSave: saveAta, ataCancel: () => { at = null; renderAta(); },
-  ataNext: el => { const x = db.atas.find(d => d.id === el.closest('li').dataset.id); const i = ATA_STATUS.findIndex(s => s[0] === x.status); x.status = ATA_STATUS[(i + 1) % ATA_STATUS.length][0]; save(); renderAta(); toast(`ÄTA ${x.nr}: ${statusLbl(x.status)}`); },
-  ataEdit: el => { const x = db.atas.find(d => d.id === el.closest('li').dataset.id); at = { ...clone(x), hours: x.hours || '', amount: x.amount ?? '' }; renderAta(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
-  ataDel: async el => { const x = db.atas.find(d => d.id === el.closest('li').dataset.id); if (!confirm(`Radera ÄTA ${x.nr}?`)) return; db.atas = db.atas.filter(d => d !== x); save(); await deleteImages(x.imageIds); renderAta(); toast('Raderad'); },
-  openDay: el => { cur = el.dataset.date; rd = null; show('reg'); },
-  repMode: el => { repMode = el.dataset.v; renderRep(); },
-  repPrev: () => { if (repMode === 'week') wk = isoWeek(addDays(mondayOf(wk.year, wk.week), -7)); else { mo.m--; if (mo.m < 0) { mo.m = 11; mo.y--; } } renderRep(); },
-  repNext: () => { if (repMode === 'week') wk = isoWeek(addDays(mondayOf(wk.year, wk.week), 7)); else { mo.m++; if (mo.m > 11) { mo.m = 0; mo.y++; } } renderRep(); },
-  print: doPrint,
+  ataSave: saveAta,
+  ataDel: async () => { const x = db.atas.find(d => d.id === at.id); if (!confirm(`Ta bort ÄTA ${x.nr}?`)) return; db.atas = db.atas.filter(d => d !== x); save(); await deleteImages(x.imageIds); closeSheet(); renderView(); toast('Borttagen'); },
+  repMode: el => { repMode = el.dataset.v; renderWeek(); },
+  repPrev: () => { if (repMode === 'week') wk = isoWeek(addDays(mondayOf(wk.year, wk.week), -7)); else { mo.m--; if (mo.m < 0) { mo.m = 11; mo.y--; } } renderWeek(); },
+  repNext: () => { if (repMode === 'week') wk = isoWeek(addDays(mondayOf(wk.year, wk.week), 7)); else { mo.m++; if (mo.m > 11) { mo.m = 0; mo.y++; } } renderWeek(); },
+  print: doPrint, share,
+  setupDone: finishSetup,
   projAdd: () => { const v = $('#newProj').value.trim(); if (v && !st.projects.includes(v)) st.projects.push(v); renderSet(); },
   projDel: el => { if (st.projects.length <= 1) return toast('Minst ett projekt behövs'); st.projects.splice(+el.dataset.v, 1); renderSet(); },
   addonAdd: el => { st.categories[+el.dataset.v].addons.push(a('')); renderSet(); const ins = $$(`[data-a^="${el.dataset.v}."][data-a$=".name"]`); ins[ins.length - 1]?.focus(); },
@@ -556,19 +568,17 @@ const ACT = {
 };
 document.addEventListener('click', e => {
   const img = e.target.closest('img[data-img]'); if (img) return openLightbox(img.dataset.img);
+  if (e.target.id === 'sheetBg') return closeSheet();
   const el = e.target.closest('[data-act]'); if (!el || !ACT[el.dataset.act]) return;
-  if (el.tagName === 'LI' && e.target.closest('button')) return;
   e.preventDefault(); ACT[el.dataset.act](el);
 });
 document.addEventListener('input', e => {
   const t = e.target, val = t.type === 'checkbox' ? t.checked : t.value;
   switch (t.id) {
-    case 'fHours': rd.hours = num(val); return updateSaveLabel();
     case 'fProject': rd.project = val; return; case 'fWo': rd.wo = val; return; case 'fNote': rd.note = val; return;
     case 'dPlace': return setDay(cur, { place: val });
     case 'dvDesc': dv.desc = val; return; case 'dvDate': dv.date = val; return; case 'dvHours': dv.hours = val; return; case 'dvProject': dv.project = val; return;
-    case 'atDesc': at.desc = val; return; case 'atBy': at.orderedBy = val; return; case 'atDate': at.date = val; return; case 'atHours': at.hours = val; return; case 'atProject': at.project = val; return; case 'atMat': at.material = val; return; case 'atAmount': at.amount = val; return;
-    case 'daysQ': { daysQ = val; const p = t.selectionStart; renderDays(); const n = $('#daysQ'); n.focus(); n.setSelectionRange(p, p); return; }
+    case 'atDesc': at.desc = val; return; case 'atBy': at.orderedBy = val; return; case 'atDate': at.date = val; return; case 'atHours': at.hours = val; return; case 'atProject': at.project = val; return; case 'atMat': at.material = val; return; case 'atAmount': at.amount = val; return; case 'atCat': at.categoryId = val; return;
   }
   if (t.dataset.q) rd.addons[t.dataset.q] = val;
   else if (t.dataset.km) rd.km[t.dataset.km] = val;
@@ -584,8 +594,8 @@ document.addEventListener('change', e => {
   if (t.id === 'restoreFile' && t.files[0]) { restore(t.files[0]); t.value = ''; }
   if (t.matches('select,input[type=checkbox]')) t.dispatchEvent(new Event('input', { bubbles: true }));
 });
-document.addEventListener('toggle', e => { if (e.target.id === 'more') moreOpen = e.target.open; }, true);
-document.addEventListener('click', e => { const l = e.target.closest('label.dl'); if (l) { const i = $('#dPick'); try { i.showPicker(); } catch (er) { i.focus(); } } });
+document.addEventListener('toggle', e => { if (e.target.id === 'more') sheetMore = e.target.open; }, true);
+document.addEventListener('click', e => { const l = e.target.closest('label.dl'); if (l && !e.target.matches('input')) { const i = $('#dPick'); try { i.showPicker(); } catch (er) { i.focus(); } } });
 
 /* ================= Start ================= */
 (async () => {
@@ -596,5 +606,6 @@ document.addEventListener('click', e => { const l = e.target.closest('label.dl')
     for (const o of all) { if (refs.has(o.id) || Date.now() - o.created < 864e5) thumbs.set(o.id, o.thumb); else await IDB.del(o.id); }
   } catch (e) { console.warn('IndexedDB', e); }
   renderView();
+  if (!S().setupDone) renderSetup();
 })();
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
