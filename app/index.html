@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#7B1E2B">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Enkel tidrapportering för småföretag – fungerar offline.">
+<title>Tidrapport</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="logo" id="logo">Granfors Åkeri AB</div>
+    <div class="sub" id="topSub">Tidrapport</div>
+  </header>
+
+  <main>
+    <!-- REGISTRERA -->
+    <section id="view-reg" class="view active">
+      <form id="regForm" class="card" autocomplete="off">
+        <input type="hidden" id="editId">
+        <h2 id="regTitle">Ny registrering</h2>
+        <label>Datum
+          <input type="date" id="fDate" required>
+        </label>
+        <div class="lbl">Timmar</div>
+        <div class="hours">
+          <button type="button" class="big" id="hMinus" aria-label="Minska timmar">−</button>
+          <input type="number" id="fHours" inputmode="decimal" step="0.25" min="0" max="24" value="8" aria-label="Timmar">
+          <button type="button" class="big" id="hPlus" aria-label="Öka timmar">+</button>
+        </div>
+        <div class="quick">
+          <button type="button" data-h="4">4</button><button type="button" data-h="6">6</button><button type="button" data-h="8">8</button><button type="button" data-h="10">10</button><button type="button" data-h="12">12</button>
+        </div>
+        <label>Projekt
+          <select id="fProject"></select>
+        </label>
+        <label>Plats
+          <input type="text" id="fPlace" placeholder="t.ex. ort eller arbetsplats" list="placeList">
+          <datalist id="placeList"></datalist>
+        </label>
+        <label>Notering
+          <textarea id="fNote" rows="2" placeholder="Vad gjordes idag?"></textarea>
+        </label>
+        <button type="submit" class="primary" id="saveBtn">Spara</button>
+        <button type="button" class="ghost hidden" id="cancelEdit">Avbryt redigering</button>
+      </form>
+      <div class="card">
+        <h2>Senaste</h2>
+        <ul class="entries" id="recentList"></ul>
+      </div>
+    </section>
+
+    <!-- LISTA -->
+    <section id="view-list" class="view">
+      <div class="card">
+        <h2>Alla registreringar</h2>
+        <input type="search" id="listFilter" placeholder="Sök projekt, plats, notering…">
+        <ul class="entries" id="allList"></ul>
+      </div>
+    </section>
+
+    <!-- VECKA -->
+    <section id="view-week" class="view">
+      <div class="card">
+        <div class="nav">
+          <button class="big" id="wPrev" aria-label="Föregående vecka">‹</button>
+          <div class="navlbl"><div id="wLabel"></div><div class="muted" id="wRange"></div></div>
+          <button class="big" id="wNext" aria-label="Nästa vecka">›</button>
+        </div>
+        <input type="week" id="wPick" aria-label="Välj vecka">
+        <div id="weekBody"></div>
+        <button class="primary" id="printWeek">Veckorapport (skriv ut / PDF)</button>
+      </div>
+    </section>
+
+    <!-- MÅNAD -->
+    <section id="view-month" class="view">
+      <div class="card">
+        <div class="nav">
+          <button class="big" id="mPrev" aria-label="Föregående månad">‹</button>
+          <div class="navlbl"><div id="mLabel"></div></div>
+          <button class="big" id="mNext" aria-label="Nästa månad">›</button>
+        </div>
+        <div id="monthBody"></div>
+        <button class="primary" id="printMonth">Fakturaunderlag (skriv ut / PDF)</button>
+      </div>
+    </section>
+
+    <!-- INSTÄLLNINGAR -->
+    <section id="view-set" class="view">
+      <form id="setForm" class="card">
+        <h2>Inställningar</h2>
+        <label>Företagsnamn <input type="text" id="sCompany"></label>
+        <label>Ditt namn <input type="text" id="sName" placeholder="Visas på rapporten"></label>
+        <label>Timpris (kr, valfritt) <input type="number" id="sRate" inputmode="decimal" min="0" step="1"></label>
+        <label>Övertid över (h/dag) <input type="number" id="sOt" inputmode="decimal" min="0" max="24" step="0.5"></label>
+        <div class="lbl">Projekt</div>
+        <ul class="projects" id="projList"></ul>
+        <div class="row">
+          <input type="text" id="newProj" placeholder="Nytt projekt">
+          <button type="button" id="addProj" class="secondary">Lägg till</button>
+        </div>
+        <label>Standardprojekt <select id="sDefault"></select></label>
+        <button type="submit" class="primary">Spara inställningar</button>
+      </form>
+      <div class="card">
+        <h2>Export och backup</h2>
+        <button class="secondary" id="csvBtn">Exportera allt som CSV</button>
+        <button class="secondary" id="backupBtn">Spara backup (JSON)</button>
+        <label class="filebtn secondary">Återställ från backup
+          <input type="file" id="restoreFile" accept="application/json,.json">
+        </label>
+        <p class="muted small">All data sparas bara i den här telefonens webbläsare. Ta backup ibland.</p>
+      </div>
+      <p class="muted small center" id="ver"></p>
+    </section>
+  </main>
+
+  <nav class="tabs" id="tabs">
+    <button data-v="reg" class="on"><span>＋</span>Registrera</button>
+    <button data-v="list"><span>☰</span>Lista</button>
+    <button data-v="week"><span>▦</span>Vecka</button>
+    <button data-v="month"><span>kr</span>Månad</button>
+    <button data-v="set"><span>⚙</span>Inställn.</button>
+  </nav>
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+
+<!-- Utskriftsvy -->
+<div id="print"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
