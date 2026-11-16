@@ -1,7 +1,7 @@
 {
   "name": "Tidrapport",
   "short_name": "Tidrapport",
-  "description": "Enkel tidrapportering för småföretag – fungerar offline.",
+  "description": "Tidrapport för maskin, åkeri och anläggning – fungerar offline.",
   "lang": "sv",
   "start_url": "./",
   "scope": "./",
