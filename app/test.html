@@ -4,28 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#121417">
+<meta name="theme-color" content="#1C1C1C">
 <meta name="color-scheme" content="dark">
 <title>Tidrapport – test</title>
 <style>
   @font-face{font-family:"Logo";src:url("fonts/Yellowtail-Regular.ttf") format("truetype");font-display:swap}
   *{box-sizing:border-box}
-  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#121417;color:#F2F2F2}
-  main{width:100%;max-width:420px;padding:32px 24px;text-align:center}
-  .card{background:#1C1F24;border-radius:24px;padding:36px 24px 28px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
-  h1{margin:0;font-family:"Logo",cursive;font-weight:400;font-size:44px;line-height:1.2;color:#E05A6F;text-align:center}
-  .sub{margin:0 0 24px;color:#A8AEB7;font-size:15px;font-weight:600;letter-spacing:.04em}
-  p{margin:0 0 32px;color:#A8AEB7;font-size:17px}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#1C1C1C;color:#F2F2F2}
+  .sidebrand{position:fixed;top:0;right:0;bottom:0;width:52px;z-index:40;pointer-events:none;display:flex;align-items:center;justify-content:center;overflow:visible}
+  .sidebrand span{font-family:"Logo",cursive;font-weight:400;font-size:clamp(24px,4.8vh,34px);line-height:1;color:#E05A6F;white-space:nowrap;width:max-content;flex:0 0 auto;transform:rotate(-90deg)}
+  main{width:100%;max-width:420px;padding:32px 68px 32px 24px;text-align:center}
+  .card{background:#2A2A2A;border-radius:24px;padding:36px 24px 28px;box-shadow:0 6px 18px rgba(0,0,0,.4)}
+  h1{margin:0 0 8px;font-size:28px;font-weight:700;color:#F2F2F2}
+  .sub{margin:0 0 24px;color:#A3A3A3;font-size:15px;font-weight:600;letter-spacing:.04em}
+  p{margin:0 0 32px;color:#A3A3A3;font-size:17px}
   a.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:64px;border-radius:16px;background:#B3364A;color:#fff;text-decoration:none;font-size:20px;font-weight:700}
   a.btn:active{background:#C4465A}
   a.btn:focus-visible{outline:3px solid #F07A8C;outline-offset:3px}
 </style>
 </head>
 <body>
+<div class="sidebrand" aria-hidden="true"><span>Granfors Åkeri AB</span></div>
 <main>
   <div class="card">
-    <h1>Granfors Åkeri AB</h1>
-    <div class="sub">Tidrapport</div>
+    <h1>Tidrapport</h1>
+    <div class="sub">Testsida</div>
     <p>Detta är en testsida. Knappen nedan går direkt in i appen utan inloggningssida.</p>
     <a class="btn" href="./">Logga in</a>
   </div>
