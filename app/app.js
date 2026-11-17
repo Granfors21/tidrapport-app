@@ -1,5 +1,7 @@
 'use strict';
-const VERSION = '4.3.0';
+const VERSION = '4.3.1';
+const BRAND = 'Granfors Åkeri AB';
+const brand = () => (db && db.settings && db.settings.company) || BRAND;
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -468,7 +470,7 @@ function printHtml(r, R) {
   const th = ids => ids && ids.length ? `<div class="thumbs">${ids.map(id => `<img src="${thumbs.get(id) || ''}" alt="">`).join('')}</div>` : '';
   const sigs = R.perDay.filter(d => d.day.signature);
   return `<div class="rep">
-  <div class="rep-head"><div class="rep-logo">${esc(s.company || 'Tidrapport')}</div><div class="rep-meta">${s.name ? esc(s.name) + '<br>' : ''}Utskriven ${today()}</div></div>
+  <div class="rep-head"><div class="rep-logo">${esc(s.company || BRAND)}</div><div class="rep-meta">${s.name ? esc(s.name) + '<br>' : ''}Utskriven ${today()}</div></div>
   <h1>${esc(r.title)}</h1><div style="color:#555">${r.sub} · ${h(R.total)} h totalt${R.ot ? ` · varav övertid ${h(R.ot)} h` : ''}</div>
   <h2>Dagbok</h2>
   <table><thead><tr><th>Datum</th><th>Projekt</th><th>Resurs</th><th>Tillägg / utrustning</th><th>Notering</th><th class="n">Tim</th></tr></thead><tbody>
@@ -623,7 +625,7 @@ function renderLock(msg = '') {
   const withPin = db.profiles.filter(p => p.pinHash);
   const title = { unlock: `Hej ${esc(pinProfile.name || '')}!`, set1: 'Välj en PIN (4 siffror)', set2: 'Skriv PIN igen' }[pinMode];
   $('#lock').innerHTML = `<div class="lockbox">
-    <div class="logo big">${esc(S().company || 'Tidrapport')}</div>
+    <div class="logo big">${esc(brand())}</div>
     <h2 id="lockTitle">${title}</h2>
     ${pinMode === 'unlock' && withPin.length > 1 ? `<div class="chips center-chips">${withPin.map(p => `<button class="chip ${p.id === pinProfile.id ? 'sel' : ''}" data-act="pinWho" data-v="${p.id}">${esc(p.name)}</button>`).join('')}</div>` : ''}
     <div class="dots" id="pinDots">${[0, 1, 2, 3].map(i => `<i class="${i < pinBuf.length ? 'on' : ''}"></i>`).join('')}</div>
@@ -650,7 +652,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) hidde
 /* ---- Första start ---- */
 let setupStage = 'choose', pendingInvite = null;
 function renderSetup() {
-  const box = (inner) => `<div class="setupbox"><div class="logo big">${esc(pendingInvite ? pendingInvite.n : (S().company || 'Tidrapport'))}</div>${inner}</div>`;
+  const box = (inner) => `<div class="setupbox"><div class="logo big">${esc(pendingInvite ? (pendingInvite.n || BRAND) : brand())}</div>${inner}</div>`;
   let html;
   if (setupStage === 'choose') html = box(`<h1>Välkommen!</h1><p>Hur ska du använda appen?</p>
     <button class="primary" data-act="suOwner" id="suOwner">Skapa företag (ägare)</button>
@@ -894,7 +896,7 @@ async function buildPdf(r, R) {
   try { await document.fonts.load('60px Logo'); } catch (e) {}
   const P = new CanvasPdf(), s = S(), multi = new Set(R.rows.map(x => x.by)).size > 1 || personFilter === 'all' && people().length > 1;
   const pname = personFilter === 'all' ? (people().length > 1 ? 'Alla' : (ME().name || '')) : (people().find(p => p.id === personFilter) || {}).name;
-  P.font(64, 400, 'Logo, cursive'); P.g.fillStyle = '#7B1E2B'; P.g.fillText(s.company || 'Tidrapport', P.M, P.y);
+  P.font(64, 400, 'Logo, cursive'); P.g.fillStyle = '#7B1E2B'; P.g.fillText(s.company || BRAND, P.M, P.y);
   P.font(20); P.g.fillStyle = '#555'; P.g.textAlign = 'right'; P.g.fillText(`${pname || ''}  ·  utskriven ${today()}`, P.W - P.M, P.y + 30); P.g.textAlign = 'left';
   P.y += 86; P.g.fillStyle = '#7B1E2B'; P.g.fillRect(P.M, P.y, P.W - 2 * P.M, 5); P.y += 20;
   P.text(r.title, { size: 40, weight: 800, gap: 2 }); P.text(`${r.sub} · ${h(R.total)} h totalt${R.ot ? ` · varav övertid ${h(R.ot)} h` : ''}`, { size: 24, color: '#444', gap: 10 });
@@ -912,7 +914,7 @@ async function buildPdf(r, R) {
   R.rows.forEach(x => addPics(x, `${x.date} ${x.catName}`)); R.photosEx.forEach(x => addPics(x, `${x.date} ${projSub(x)}`)); R.atas.forEach(x => addPics(x, `${ataNo(x)}`)); R.devs.forEach(x => addPics(x, `Avvikelse ${x.date}`));
   if (pics.length) { P.heading(`Foton (${pics.length})`); await P.images(pics.slice(0, 40)); }
   P.ensure(140); P.y += 70; P.g.fillStyle = '#111'; P.g.fillRect(P.M, P.y, 440, 2); P.g.fillRect(P.W - P.M - 440, P.y, 440, 2); P.font(20); P.g.fillText('Signatur förare / arbetsledare', P.M, P.y + 8); P.g.fillText('Attest beställare – namn och datum', P.W - P.M - 440, P.y + 8);
-  P.footer(`${s.company || 'Tidrapport'} – ${r.title}`);
+  P.footer(`${s.company || BRAND} – ${r.title}`);
   return P.toBlob();
 }
 async function weekPdfFile() { const r = range(), R = report(r.from, r.to); const blob = await buildPdf(r, R); const w = repMode === 'week' ? `v${wk.week}-${wk.year}` : `${mo.y}-${pad(mo.m + 1)}`; return { file: new File([blob], `Tidrapport-${w}${personFilter !== 'all' ? '-' + slug((people().find(p => p.id === personFilter) || {}).name) : ''}.pdf`, { type: 'application/pdf' }), r, R }; }
@@ -1028,7 +1030,7 @@ function show(v) {
 $$('#tabs button').forEach(b => b.onclick = () => { closeSheet(); show(b.dataset.v); });
 $('#profBtn').onclick = () => { closeSheet(); if (lockActive() && ME().pinHash) showLock(); else show('set'); };
 function applyTheme() { const l = S().theme === 'light'; document.documentElement.dataset.theme = l ? 'light' : 'dark'; const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = l ? '#F5F3F3' : '#121417'; }
-function renderHeader() { applyTheme(); $('#logo').textContent = S().company || 'Tidrapport'; $('#topSub').textContent = ME().name || S().name || ''; const b = $('#profBtn'); b.textContent = ME().pinHash && S().lock ? '🔒' : '👤'; b.title = ME().pinHash && S().lock ? 'Lås nu' : 'Profil'; }
+function renderHeader() { applyTheme(); $('#logo').textContent = brand(); $('#topSub').textContent = ME().name || S().name || ''; const b = $('#profBtn'); b.textContent = ME().pinHash && S().lock ? '🔒' : '👤'; b.title = ME().pinHash && S().lock ? 'Lås nu' : 'Profil'; }
 const byId = (arr, el) => arr.find(x => x.id === el.dataset.v);
 const ACT = {
   dPrev: () => goDate(ymd(addDays(cur, -1))), dNext: () => goDate(ymd(addDays(cur, 1))), dToday: () => goDate(today()),
