@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.2.0';
+const VERSION = '4.3.0';
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -168,7 +168,8 @@ function addonOrder(cat) {
   const cnt = {}; db.rows.filter(r => r.categoryId === cat.id).forEach(r => (r.addons || []).forEach(x => cnt[x.id] = (cnt[x.id] || 0) + 1));
   return cat.addons.map((x, i) => ({ x, i, c: cnt[x.id] || 0 })).sort((p, q) => q.c - p.c || p.i - q.i).map(o => o.x);
 }
-const rowSub = r => [projSub(r), addonText(r), r.km && r.km.km ? r.km.km + ' km' : '', r.note].filter(Boolean).join(' · ');
+function timeTxt(r) { return r && r.time && r.time.from ? `${r.time.from}–${r.time.to}${num(r.time.brk) ? ` (rast ${num(r.time.brk)} min)` : ''}` : ''; }
+const rowSub = r => [projSub(r), timeTxt(r), addonText(r), r.km && r.km.km ? r.km.km + ' km' : '', r.note].filter(Boolean).join(' · ');
 function renderToday() {
   const rows = dayRows(cur), tot = dayTotal(cur), lim = num(S().otLimit) || 8, day = getDay(cur);
   const prev = prevWorkDay(cur), prevRows = prev ? dayRows(prev) : [];
@@ -183,8 +184,7 @@ function renderToday() {
     <button class="nb" data-act="dNext" aria-label="Nästa dag">›</button>
   </div>
   ${cur !== today() ? '<button class="link" data-act="dToday">← Till idag</button>' : ''}
-  ${myTimer() ? (() => { const t = myTimer(), c = catById(t.categoryId) || { icon: '⏱️', name: 'Klocka' }; return `<div class="timer" id="timerCard"><div><i>${esc(c.icon)}</i><span><b>${esc(c.name)} pågår</b><small>start ${new Date(t.start).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })} · ${esc(t.project)}</small></span><em id="timerElapsed">${fmtElapsed(Date.now() - t.start)}</em></div><button class="stop" data-act="timerStop" id="stopBtn">■ Stoppa och spara</button></div>`; })() : ''}
-  ${!myTimer() ? (() => { const c = lastCatFor(), pj = lastProjectFor(cur); return `<button class="quickstart" data-act="timerQuick" id="quickStart">${c ? 'Starta ' + esc(c.name) : 'Starta'}<small>${c ? esc(pj || '') : 'Välj maskin och klockan går'}</small></button>`; })() : ''}
+  <form class="entry" id="entry" autocomplete="off">${entryHtml(prev, prevRows)}</form>
   ${rows.length || devs.length || atas.length || exs.length ? `<div class="daycard">
       ${rows.length ? `<div class="dtot"><b id="dayTotal">${h(tot)} h</b><span>${tot > lim ? `<span class="ot">varav ${h(tot - lim)} h övertid</span>` : 'sparat ✓'}</span></div>` : ''}
       <ul class="rows" id="dayList">${rows.map(r => `<li><button class="rowbtn" data-act="rowEdit" data-v="${r.id}"><i>${r.catIcon || '⏱️'}</i><span><b>${esc(r.catName)}</b><small>${esc(rowSub(r))}${r.imageIds?.length ? ` · 📷${r.imageIds.length}` : ''}</small></span><em>${h(r.hours)}</em></button></li>`).join('')}
@@ -193,9 +193,6 @@ function renderToday() {
       ${atas.map(x => `<li><button class="rowbtn" data-act="ataEdit" data-v="${x.id}"><i>➕</i><span><b>${ataNo(x)} · ${ataTypeLbl(x.type)} · ${statusLbl(x.status)}</b><small>${esc(x.desc)}</small></span><em>${x.hours ? h(x.hours) : ''}</em></button></li>`).join('')}</ul>
       ${undoIds ? '<button class="link" data-act="undo" id="undoBtn">↶ Ångra</button>' : ''}
     </div>` : ''}
-  ${!rows.length && prevRows.length ? `<button class="same" data-act="copyPrev" id="sameBtn"><b>${prev === ymd(addDays(cur, -1)) ? 'Samma som igår' : 'Samma som ' + fmtDate(prev)}</b><span>${h(dayTotal(prev))} h · ${esc([...new Set(prevRows.map(r => r.catName))].join(' + '))} · ${esc([...new Set(prevRows.map(r => r.project))].join(', '))}</span></button>` : ''}
-  <div class="sect">${rows.length ? 'Lägg till maskin' : 'Välj maskin'}</div>
-  <div class="cats" id="cats">${S().categories.map(c => `<button class="cat" data-act="cat" data-v="${c.id}">${esc(c.name)}</button>`).join('')}</div>
   <div class="tools">
     <button class="tool" data-act="newExtra" id="exBtn">Tillägg</button>
     <button class="tool" data-act="newAta" id="ataBtn">ÄTA</button>
@@ -206,7 +203,7 @@ function renderToday() {
   <p class="muted small">Tryck på mikrofonen i tangentbordet för att tala in.</p></details>
   <button class="weekline" data-act="goWeek" id="weekLine">Vecka ${w.week}<b>${h(wtot)} h</b></button>`;
 }
-function goDate(d) { cur = d; undoIds = null; renderToday(); }
+function goDate(d) { cur = d; undoIds = null; fm = null; renderToday(); }
 function copyPrev() {
   const prev = prevWorkDay(cur); if (!prev) return;
   const t = Date.now(); undoIds = [];
@@ -265,7 +262,6 @@ function sheetRow() {
     ${day.gps ? `<small class="muted">📍 ${day.gps.lat.toFixed(5)}, ${day.gps.lng.toFixed(5)}</small>` : ''}
   </details>
   <button class="primary" data-act="rowSave" id="saveBtn">Spara</button>
-  ${!rd.id ? '<button class="startbtn" data-act="timerStart" id="startBtn">▶ Starta klocka</button>' : ''}
   ${rd.id ? '<button class="del" data-act="rowDel" id="rowDel">Ta bort raden</button>' : ''}`;
 }
 function setHours(v) { rd.hours = Math.max(0, Math.min(24, Math.round(num(v) * 2) / 2)); $('#hOut').textContent = h(rd.hours); $$('#sheetBody .quick button').forEach(b => b.classList.toggle('sel', num(b.dataset.v) === rd.hours)); }
@@ -275,6 +271,7 @@ function saveRow() {
   const addons = cat ? cat.addons.filter(x => x.id in rd.addons).map(x => ({ id: x.id, name: x.name, unit: x.unit, qty: x.unit ? num(rd.addons[x.id]) : 1, price: x.price })) : (old ? old.addons : []);
   const km = cat && cat.km && (rd.km.km || rd.km.from || rd.km.to) ? { km: num(rd.km.km), from: rd.km.from.trim(), to: rd.km.to.trim() } : null;
   const data = { date: cur, project: rd.project, sub: (rd.sub || '').trim(), wo: rd.wo.trim(), categoryId: cat ? cat.id : old.categoryId, catName: cat ? cat.name : old.catName, catIcon: cat ? cat.icon : old.catIcon, hours: num(rd.hours), addons, km, materials: rd.materials.filter(m => num(m.qty) > 0).map(m => ({ ...m, qty: num(m.qty) })), note: rd.note.trim(), mh: num(rd.mh) > 0 && num(rd.mh) !== num(rd.hours) ? num(rd.mh) : '', imageIds: rd.imageIds };
+  if (old && old.time && num(rd.hours) !== num(old.hours)) old.time = null;
   if (old) Object.assign(old, data, { updated: Date.now() }); else db.rows.push(stamp({ id: uid(), created: Date.now(), ...data }));
   if (cat) S().lastCat = cat.id;
   if (getDay(cur).breakMin === undefined) db.days[cur] = { ...getDay(cur), breakMin: num(S().defBreak) };
@@ -552,7 +549,7 @@ function saveSettings() {
   st.materials = st.materials.filter(m => m.name.trim()); st.articles = st.articles.filter(m => m.name.trim());
   if (!st.projects.length) st.projects = ['Allmänt'];
   if (!st.projects.includes(st.defaultProject)) st.defaultProject = st.projects[0];
-  db.settings = st; const pr = db.profiles.find(x => x.id === ME().id); if (pr && st.name && pr.name !== st.name) { pr.name = st.name; ['rows', 'devs', 'atas', 'extras'].forEach(k => db[k].forEach(x => { if (x.by === pr.id) x.byName = st.name; })); } if (db.company && db.company.role === 'owner') db.company.name = st.company || ''; save(); st = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
+  db.settings = st; fm = null; const pr = db.profiles.find(x => x.id === ME().id); if (pr && st.name && pr.name !== st.name) { pr.name = st.name; ['rows', 'devs', 'atas', 'extras'].forEach(k => db[k].forEach(x => { if (x.by === pr.id) x.byName = st.name; })); } if (db.company && db.company.role === 'owner') db.company.name = st.company || ''; save(); st = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
 }
 
 /* ================= Export ================= */
@@ -568,7 +565,7 @@ function toCSV(from = '0000', to = '9999') {
   const dn = v => String(v ?? '').replace('.', ',');
   const out = [['Typ', 'Datum', 'Vecka', 'Projekt', 'Arbetsorder', 'Plats', 'Resurs', 'Timmar', 'Tillägg', 'Km', 'Från', 'Till', 'Material', 'Notering/Beskrivning', 'Status', 'Beordrad av', 'Belopp', 'Bilder', 'Underprojekt', 'Person', 'Maskintimmar']];
   const wkOf = d => { const w = isoWeek(parse(d)); return `${w.year}-V${pad(w.week)}`; };
-  [...db.rows].filter(keep).sort((x, y) => x.date.localeCompare(y.date)).forEach(r => opush(r, ['Tid', r.date, wkOf(r.date), r.project, r.wo, getDay(r.date).place, r.catName, dn(r.hours), addonText(r), r.km ? dn(r.km.km) : '', r.km?.from, r.km?.to, (r.materials || []).map(m => `${m.name} ${dn(m.qty)} ${m.unit}`).join(', '), r.note, '', '', dn(Math.round(rowAmount(r))), (r.imageIds || []).length, r.sub || '']));
+  [...db.rows].filter(keep).sort((x, y) => x.date.localeCompare(y.date)).forEach(r => opush(r, ['Tid', r.date, wkOf(r.date), r.project, r.wo, getDay(r.date).place, r.catName, dn(r.hours), addonText(r), r.km ? dn(r.km.km) : '', r.km?.from, r.km?.to, (r.materials || []).map(m => `${m.name} ${dn(m.qty)} ${m.unit}`).join(', '), [timeTxt(r), r.note].filter(Boolean).join(' · '), '', '', dn(Math.round(rowAmount(r))), (r.imageIds || []).length, r.sub || '']));
   db.extras.filter(keep).sort((x, y) => x.date.localeCompare(y.date)).forEach(x => opush(x, x.kind === 'article' ? ['Artikel', x.date, wkOf(x.date), x.project, '', getDay(x.date).place, x.name, x.unit === 'h' ? dn(x.qty) : '', `${x.name} ${dn(x.qty)} ${x.unit}`, '', '', '', '', x.note, '', '', '', 0, x.sub || ''] : ['Foto', x.date, wkOf(x.date), x.project, '', getDay(x.date).place, '', '', '', '', '', '', '', x.note, '', '', '', (x.imageIds || []).length, x.sub || '']));
   db.devs.filter(keep).forEach(x => opush(x, ['Avvikelse', x.date, wkOf(x.date), x.project, '', '', devType(x.type)[1], dn(x.hours), '', '', '', '', '', x.desc, x.status === 'open' ? 'Öppen' : 'Åtgärdad', '', '', (x.imageIds || []).length]));
   db.atas.filter(keep).sort((x, y) => x.date.localeCompare(y.date)).forEach(x => opush(x, [ataNo(x), x.date, wkOf(x.date), x.project, '', '', x.catName, dn(x.hours), ataTypeLbl(x.type), '', '', '', ataArtText(x), x.desc, statusLbl(x.status), x.orderedBy, dn(Math.round(ataAmount(x))), (x.imageIds || []).length, x.sub || '']));
@@ -732,7 +729,7 @@ async function handleInviteObj(inv) {
   const fresh = !['rows', 'devs', 'atas', 'extras'].some(k => db[k].length);
   if (db.company && db.company.role === 'owner' && db.company.id === inv.c) return toast('Det här är din egen inbjudan');
   if (db.company && db.company.id !== inv.c && !fresh && !confirm(`Byta till företaget ${inv.n}? Dina egna poster behålls.`)) return;
-  const was = db.company && db.company.id === inv.c; applyInvite(inv); const me = db.profiles.find(x => x.id === ME().id); if (me && !was) me.role = 'employee';
+  const was = db.company && db.company.id === inv.c; applyInvite(inv); fm = null; const me = db.profiles.find(x => x.id === ME().id); if (me && !was) me.role = 'employee';
   save(); $('#setup').classList.add('hidden'); renderHeader(); renderView(); toast(was ? `Uppdaterat från ${inv.n}: projekt, maskiner och artiklar ✓` : `Ansluten till ${inv.n} ✓`);
 }
 async function handleJoinText(txt) {
@@ -857,13 +854,18 @@ function stopTimer(quiet) {
   delete db.timers[meId()]; save(); if (!quiet) { cur = t.date; renderToday(); toast(`Sparat ${h(hrs)} h ${cat.name.toLowerCase()} ✓`); }
 }
 const fmtElapsed = ms => { const m = Math.floor(ms / 60e3); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
-setInterval(() => { const el = $('#timerElapsed'), t = myTimer && db && db.timers && myTimer(); if (el && t) el.textContent = fmtElapsed(Date.now() - t.start); }, 15000);
 
 /* ---- Röst/tangentbord: snabbtolk ---- */
 const NUMW = { en: 1, ett: 1, två: 2, tre: 3, fyra: 4, fem: 5, sex: 6, sju: 7, åtta: 8, nio: 9, tio: 10, elva: 11, tolv: 12 };
 const CAT_ALIAS = { grävare: 'grävmaskin', grävis: 'grävmaskin', bandare: 'grävmaskin', bil: 'lastbil', hjullastare: 'lastmaskin', lastare: 'lastmaskin', traktor: 'traktorgrävare', jcb: 'traktorgrävare' };
 function parseQuick(text) {
-  const s = ' ' + text.toLowerCase().replace(/(\d),(\d)/g, '$1.$2') + ' ';
+  let s = ' ' + text.toLowerCase().replace(/(\d),(\d)/g, '$1.$2') + ' ';
+  let from = '', to = '', brk = 0, unit = false;
+  const hm = (H, M) => String(Math.min(23, num(H))).padStart(2, '0') + ':' + String(Math.min(59, num(M || 0))).padStart(2, '0');
+  const br = s.match(/rast\s*(\d+)\s*(?:min|minuter)?/); if (br) { brk = num(br[1]); s = s.replace(br[0], ' '); }
+  const rg = s.match(/(?:från\s*)?(?:kl\.?\s*|klockan\s*)?(\d{1,2})(?:[:.](\d{2}))?\s*(?:-|–|till)\s*(?:kl\.?\s*|klockan\s*)?(\d{1,2})(?:[:.](\d{2}))?(?!\s*(?:h|tim))/);
+  if (rg && num(rg[1]) < 24 && num(rg[3]) < 24) { from = hm(rg[1], rg[2]); to = hm(rg[3], rg[4]); s = s.replace(rg[0], ' '); }
+  if (/\d\s*(h|tim|timmar|timme)\b/.test(s) || /(en|ett|två|tre|fyra|fem|sex|sju|åtta|nio|tio|elva|tolv)\s+(h|tim|timmar|timme)\b/.test(s)) unit = true;
   let hours = null; const m = s.match(/(\d+(?:\.\d+)?)\s*(?:h|tim|timmar|timme)?\b/); if (m) hours = num(m[1]);
   else { const w = Object.keys(NUMW).find(k => new RegExp(`\\s${k}\\s+(h|tim|timmar|timme)`).test(s)); if (w) hours = NUMW[w]; if (/halv/.test(s) && hours) hours += 0.5; }
   const cats = [...S().categories].sort((a, b) => b.name.length - a.name.length);
@@ -872,20 +874,19 @@ function parseQuick(text) {
   const addons = cat ? cat.addons.filter(x => s.includes(x.name.toLowerCase())) : [];
   const arts = S().articles.filter(x => s.includes(x.name.toLowerCase()) && !addons.some(y => y.name.toLowerCase() === x.name.toLowerCase()));
   const project = S().projects.find(p => s.includes(p.toLowerCase()));
-  return { hours, cat, addons, arts, project };
+  return { hours, cat, addons, arts, project, from, to, brk, unit };
 }
-function quickSave(text) {
-  const q = parseQuick(text); if (!q.cat && !q.arts.length) return toast('Förstod inte – säg t.ex. "8 timmar grävmaskin rototilt"');
-  const project = q.project || lastProjectFor(cur), sub = lastSubFor(project), t = Date.now(); undoIds = [];
-  let msg = [];
-  if (q.cat) {
-    const hrs = q.hours || Math.max(0.5, (num(S().otLimit) || 8) - dayTotal(cur)) || 8;
-    const r = stamp({ id: uid(), created: t, date: cur, project, sub, wo: '', categoryId: q.cat.id, catName: q.cat.name, catIcon: q.cat.icon, hours: hrs, addons: q.addons.map(x => ({ id: x.id, name: x.name, unit: x.unit, qty: x.unit === 'h' ? hrs : x.unit ? 1 : 1, price: x.price })), km: null, materials: [], note: '', imageIds: [] });
-    db.rows.push(r); undoIds.push(r.id); msg.push(`${h(hrs)} h ${q.cat.name.toLowerCase()}${q.addons.length ? ' + ' + q.addons.map(x => x.name).join(', ') : ''}`);
-    if (getDay(cur).breakMin === undefined) db.days[cur] = { ...getDay(cur), breakMin: num(S().defBreak) };
-  }
-  q.arts.forEach((a, i) => { const qty = a.unit === 'h' ? (q.hours || dayTotal(cur) || 8) : 1; const x = stamp({ id: uid(), created: t + 1 + i, date: cur, project, sub, kind: 'article', name: a.name, qty, unit: a.unit, note: '' }); db.extras.push(x); undoIds.push(x.id); msg.push(`${a.name} ${h(qty)} ${a.unit}`); });
-  S().lastCat = q.cat ? q.cat.id : S().lastCat; save(); renderToday(); toast('Sparat: ' + msg.join(' · '));
+function quickFill(text) {
+  const q = parseQuick(text);
+  if (!q.cat && !q.arts.length && !q.from && !(q.hours > 0 && q.hours <= 24 && q.unit)) return toast('Förstod inte – säg t.ex. "8 timmar grävmaskin" eller "7 till 16 rast 30"');
+  const f = entryState();
+  if (q.cat) { f.categoryId = q.cat.id; f.addons = q.addons.map(x => x.id); }
+  if (q.project) { f.project = q.project; f.sub = lastSubFor(q.project); }
+  if (q.from) { f.mode = 'clock'; f.from = q.from; f.to = q.to; f.brk = q.brk ? String(q.brk) : ''; }
+  else if (q.hours > 0 && q.hours <= 24) { f.mode = 'hours'; f.hours = String(q.hours).replace('.', ','); }
+  f.arts = q.arts.map(a => a.name);
+  renderToday(); const e = $('#entry'); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'start' });
+  toast('Ifyllt – kontrollera och tryck Spara');
 }
 
 /* ---- PDF-veckorapport + e-post ---- */
@@ -899,7 +900,7 @@ async function buildPdf(r, R) {
   P.text(r.title, { size: 40, weight: 800, gap: 2 }); P.text(`${r.sub} · ${h(R.total)} h totalt${R.ot ? ` · varav övertid ${h(R.ot)} h` : ''}`, { size: 24, color: '#444', gap: 10 });
   P.heading('Dagbok');
   const cols = multi ? [{ t: 'Datum', w: .13 }, { t: 'Person', w: .13 }, { t: 'Projekt', w: .18 }, { t: 'Maskin', w: .15 }, { t: 'Tillägg / notering', w: .33 }, { t: 'Förar-h', w: .08, right: true }] : [{ t: 'Datum', w: .14 }, { t: 'Projekt', w: .22 }, { t: 'Maskin', w: .17 }, { t: 'Tillägg / notering', w: .39 }, { t: 'Förar-h', w: .08, right: true }];
-  P.table(cols, R.rows.map(x => { const d = `${dayName(x.date).slice(0, 3)} ${parse(x.date).getDate()}/${parse(x.date).getMonth() + 1}`; const t = [num(x.mh) > 0 ? `maskintid ${h(x.mh)} h` : '', addonText(x), x.km && x.km.km ? x.km.km + ' km' : '', x.note].filter(Boolean).join(' · '); return multi ? [d, x.byName || '', projSub(x), x.catName, t, h(x.hours)] : [d, projSub(x), x.catName, t, h(x.hours)]; }), { total: multi ? ['Totalt', '', '', '', '', h(R.total)] : ['Totalt', '', '', '', h(R.total)] });
+  P.table(cols, R.rows.map(x => { const d = `${dayName(x.date).slice(0, 3)} ${parse(x.date).getDate()}/${parse(x.date).getMonth() + 1}`; const t = [timeTxt(x), num(x.mh) > 0 ? `maskintid ${h(x.mh)} h` : '', addonText(x), x.km && x.km.km ? x.km.km + ' km' : '', x.note].filter(Boolean).join(' · '); return multi ? [d, x.byName || '', projSub(x), x.catName, t, h(x.hours)] : [d, projSub(x), x.catName, t, h(x.hours)]; }), { total: multi ? ['Totalt', '', '', '', '', h(R.total)] : ['Totalt', '', '', '', h(R.total)] });
   if (R.cats.length) { P.heading('Per maskin med tillägg'); const rows = []; R.cats.forEach(c => { rows.push([`${c.icon || ''} ${c.name}`, '', h(c.hours)]); Object.values(c.addons).forEach(A => rows.push([`    ${A.name}`, `${A.count} ggr`, A.unit ? `${h(A.qty)} ${A.unit}` : ''])); }); P.table([{ t: 'Maskin / tillägg', w: .6 }, { t: 'Antal', w: .2, right: true }, { t: 'Maskintimmar', w: .2, right: true }], rows); }
   if (R.trips.length) { P.heading('Körjournal'); P.table([{ t: 'Datum', w: .18 }, { t: 'Från', w: .27 }, { t: 'Till', w: .27 }, { t: 'Projekt', w: .16 }, { t: 'Km', w: .12, right: true }], R.trips.map(x => [x.date, x.km.from, x.km.to, x.project, h(x.km.km)]), { total: ['Totalt', '', '', '', h(R.km)] }); }
   if (R.arts.length) { P.heading('Artiklar / utrustning'); P.table([{ t: 'Datum', w: .16 }, { t: 'Projekt / underprojekt', w: .3 }, { t: 'Artikel', w: .24 }, { t: 'Notering', w: .16 }, { t: 'Antal', w: .14, right: true }], R.arts.map(x => [x.date, projSub(x), x.name, x.note || '', `${h(x.qty)} ${x.unit}`])); P.table([{ t: 'Summa per artikel', w: .6 }, { t: 'Tillfällen', w: .2, right: true }, { t: 'Totalt', w: .2, right: true }], R.artSum.map(a => [a.name, String(a.n), `${h(a.qty)} ${a.unit}`])); }
@@ -949,6 +950,70 @@ function teamCards() {
     <p class="muted small">”Skicka veckorapport” skapar en PDF och öppnar delningsmenyn (välj Gmail). Mottagarna kopieras så att du kan klistra in dem. Spara med knappen längst ner.</p></div>`;
 }
 const lastCatFor = () => { const r = dayRows(cur).slice(-1)[0] || [...db.rows].filter(mine).sort((x, y) => (y.created || 0) - (x.created || 0))[0]; return catById((r && r.categoryId) || S().lastCat) || null; };
+/* ================= Idag: registrera tid (timmar eller klockslag) ================= */
+let fm = null;
+function entryState() {
+  if (fm && fm.date === cur) return fm;
+  const pj = lastProjectFor(cur) || S().defaultProject;
+  const lc = catById(S().lastCat);
+  fm = { date: cur, categoryId: lc ? lc.id : '', project: pj, sub: lastSubFor(pj) || '', mode: S().timeMode === 'clock' ? 'clock' : 'hours', hours: '', from: S().lastFrom || '07:00', to: S().lastTo || '16:00', brk: S().lastBrk ?? '', note: '', addons: [], arts: [] };
+  return fm;
+}
+const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? num(m[1]) * 60 + num(m[2]) : null; };
+function clockHours(f) { const a = toMin(f.from), b = toMin(f.to); if (a === null || b === null) return 0; let d = b - a; if (d <= 0) d += 1440; d -= num(f.brk); return Math.max(0, Math.round(d / 60 * 100) / 100); }
+function updCalc() { const el = $('#fmCalc'); if (el) { const v = clockHours(fm); el.textContent = v ? `= ${h(v)} h` : 'Ange från och till'; } }
+function entryHtml(prev, prevRows) {
+  const f = entryState(), cats = S().categories, cat = catById(f.categoryId);
+  const sameLbl = prev ? (prev === ymd(addDays(cur, -1)) ? 'Samma som igår' : 'Samma som ' + fmtDate(prev)) : '';
+  const extra = [cat && f.addons.length ? 'Tillägg: ' + cat.addons.filter(x => f.addons.includes(x.id)).map(x => x.name).join(', ') : '', f.arts.length ? 'Artiklar: ' + f.arts.join(', ') : ''].filter(Boolean).join(' · ');
+  return `${prevRows && prevRows.length && !dayRows(cur).length ? `<button type="button" class="same" data-act="fillPrev" id="sameBtn"><b>${sameLbl}</b><span>${h(dayTotal(prev))} h · ${esc([...new Set(prevRows.map(r => r.catName))].join(' + '))} · ${esc([...new Set(prevRows.map(r => r.project))].join(', '))}</span></button>` : ''}
+  <div class="lbl">Maskin <span class="opt">valfritt</span></div>
+  <div class="chips mchips" id="fmCats">${cats.map(c => `<button type="button" class="chip ${f.categoryId === c.id ? 'sel' : ''}" data-act="fmCat" data-v="${c.id}">${esc(c.name)}</button>`).join('')}</div>
+  <div class="grid2"><label>Projekt<select id="fmProject">${projOptions(f.project)}</select></label><label>Delprojekt<input type="text" id="fmSub" list="fmSubList" value="${esc(f.sub)}" placeholder="valfritt"></label></div>
+  <datalist id="fmSubList">${subOptions(f.project).map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+  <div class="seg fmseg" id="fmMode"><button type="button" data-act="fmMode" data-v="hours" class="${f.mode === 'hours' ? 'on' : ''}">Timmar</button><button type="button" data-act="fmMode" data-v="clock" class="${f.mode === 'clock' ? 'on' : ''}">Klockslag</button></div>
+  ${f.mode === 'hours' ? `<label class="sr">Timmar<input type="text" inputmode="decimal" aria-label="Timmar" id="fmHours" value="${esc(f.hours)}" placeholder="t.ex. 8 eller 7,5" enterkeyhint="done"></label>
+  <div class="quick">${[4, 6, 8, 10].map(v => `<button type="button" data-act="fmH" data-v="${v}" class="${num(f.hours) === v ? 'sel' : ''}">${v}</button>`).join('')}</div>`
+  : `<div class="grid2"><label>Från<input type="time" id="fmFrom" value="${esc(f.from)}"></label><label>Till<input type="time" id="fmTo" value="${esc(f.to)}"></label></div>
+  <div class="brkrow"><label for="fmBrk">Rast i minuter <span class="opt">dras av</span></label><input type="number" inputmode="numeric" min="0" step="5" id="fmBrk" value="${esc(f.brk)}" placeholder="0"></div>
+  <p class="calc" id="fmCalc">${clockHours(f) ? `= ${h(clockHours(f))} h` : 'Ange från och till'}</p>`}
+  ${extra ? `<p class="muted small" id="fmExtra">${esc(extra)}</p>` : ''}
+  <label>Anteckning<textarea id="fmNote" rows="2" placeholder="valfritt">${esc(f.note)}</textarea></label>
+  <button type="submit" class="primary" id="fmSave">Spara</button>`;
+}
+function renderEntry() { const e = $('#entry'); if (!e) return; const prev = prevWorkDay(cur); e.innerHTML = entryHtml(prev, prev ? dayRows(prev) : []); }
+function fillPrev() {
+  const prev = prevWorkDay(cur); if (!prev) return; const pr = dayRows(prev); if (!pr.length) return;
+  const r = [...pr].sort((a, b) => num(b.hours) - num(a.hours))[0], f = entryState();
+  Object.assign(f, { categoryId: catById(r.categoryId) ? r.categoryId : '', project: r.project, sub: r.sub || '', note: '', addons: (r.addons || []).map(x => x.id).filter(id => (catById(r.categoryId) || { addons: [] }).addons.some(y => y.id === id)), arts: [] });
+  if (r.time && r.time.from) Object.assign(f, { mode: 'clock', from: r.time.from, to: r.time.to, brk: r.time.brk ?? '' }); else Object.assign(f, { mode: 'hours', hours: String(r.hours).replace('.', ',') });
+  renderEntry(); toast(pr.length > 1 ? `Ifyllt från ${fmtDate(prev)} (${r.catName}) – tryck Spara` : 'Ifyllt – tryck Spara');
+}
+function fmSave() {
+  const f = entryState(); const hrs = f.mode === 'clock' ? clockHours(f) : Math.round(num(f.hours) * 100) / 100;
+  if (!(hrs > 0)) return toast(f.mode === 'clock' ? 'Ange från och till' : 'Ange timmar, t.ex. 8 eller 7,5');
+  if (hrs > 24) return toast('Max 24 timmar per rad');
+  const cat = catById(f.categoryId), t = Date.now(); undoIds = [];
+  const addons = cat ? cat.addons.filter(x => f.addons.includes(x.id)).map(x => ({ id: x.id, name: x.name, unit: x.unit, qty: x.unit === 'h' ? hrs : 1, price: x.price })) : [];
+  const r = stamp({ id: uid(), created: t, date: cur, project: f.project, sub: (f.sub || '').trim(), wo: '', categoryId: cat ? cat.id : '', catName: cat ? cat.name : 'Arbetstid', catIcon: cat ? cat.icon : '', hours: hrs, addons, km: null, materials: [], note: (f.note || '').trim(), imageIds: [], time: f.mode === 'clock' ? { from: f.from, to: f.to, brk: num(f.brk) } : null });
+  db.rows.push(r); undoIds.push(r.id);
+  f.arts.forEach((name, i) => { const a = S().articles.find(x => x.name === name); if (!a) return; const x = stamp({ id: uid(), created: t + 1 + i, date: cur, project: r.project, sub: r.sub, kind: 'article', name: a.name, qty: a.unit === 'h' ? hrs : 1, unit: a.unit, note: '' }); db.extras.push(x); undoIds.push(x.id); });
+  if (r.sub && r.project) { const sp = S().subprojects; sp[r.project] = [...new Set([...(sp[r.project] || []), r.sub])]; }
+  if (f.mode === 'clock') { S().lastFrom = f.from; S().lastTo = f.to; S().lastBrk = f.brk; setDay(cur, { breakMin: dayRows(cur).reduce((m, x) => m + num(x.time && x.time.brk), 0) }); }
+  if (cat) S().lastCat = cat.id; S().timeMode = f.mode;
+  fm = { ...f, hours: '', note: '', addons: [], arts: [] };
+  save(); renderToday(); toast(`Sparat ${h(hrs)} h${cat ? ' ' + cat.name.toLowerCase() : ''} ✓`);
+}
+/* Äldre pågående klocka (v4.0–4.2): sparas som en rad om den startade senast för 16 h sedan, annars släpps den. */
+function convertTimers() {
+  const ts = db.timers || {}; const ids = Object.keys(ts); if (!ids.length) return;
+  let saved = 0;
+  ids.forEach(pid => { const t = ts[pid]; if (!t || !t.start) return; const ms = Date.now() - t.start; if (ms > 0 && ms < 16 * 36e5) {
+    const cat = catById(t.categoryId), hrs = Math.max(0.25, Math.round(ms / 36e5 * 4) / 4), p = db.profiles.find(x => x.id === pid) || {}, st0 = new Date(t.start), en = new Date();
+    const hhmm = d => d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+    db.rows.push({ id: uid(), created: Date.now(), date: t.date || ymd(st0), project: t.project || S().defaultProject, sub: t.sub || '', wo: '', categoryId: cat ? cat.id : '', catName: cat ? cat.name : 'Arbetstid', catIcon: cat ? cat.icon : '', hours: hrs, addons: [], km: null, materials: [], note: '', imageIds: [], time: { from: hhmm(st0), to: hhmm(en), brk: 0 }, by: pid, byName: p.name || '' }); saved++; } });
+  db.timers = {}; save(); if (saved) setTimeout(() => toast('Pågående klocka sparad som tid – kontrollera raden'), 600);
+}
 /* ================= Navigering & händelser ================= */
 let view = 'today';
 const RENDER = { today: renderToday, week: renderWeek, set: renderSet };
@@ -969,7 +1034,8 @@ const ACT = {
   dPrev: () => goDate(ymd(addDays(cur, -1))), dNext: () => goDate(ymd(addDays(cur, 1))), dToday: () => goDate(today()),
   goDate: el => goDate(el.dataset.v),
   openDay: el => { cur = el.dataset.v; undoIds = null; show('today'); },
-  copyPrev, undo: () => { db.rows = db.rows.filter(r => !undoIds.includes(r.id)); db.extras = db.extras.filter(x => !undoIds.includes(x.id)); undoIds = null; save(); renderToday(); toast('Ångrat'); },
+  copyPrev, fillPrev, fmSave, fmCat: el => { fm.categoryId = fm.categoryId === el.dataset.v ? '' : el.dataset.v; fm.addons = []; renderEntry(); }, fmMode: el => { fm.mode = el.dataset.v; renderEntry(); }, fmH: el => { fm.hours = el.dataset.v; renderEntry(); },
+  undo: () => { db.rows = db.rows.filter(r => !undoIds.includes(r.id)); db.extras = db.extras.filter(x => !undoIds.includes(x.id)); undoIds = null; save(); renderToday(); toast('Ångrat'); },
   cat: el => { rd = newRowDraft(el.dataset.v); openSheet('row'); },
   rowEdit: el => { rd = rowToDraft(byId(db.rows, el)); openSheet('row'); sheetMore = !!(rd.note || rd.materials.length || rd.imageIds.length || rd.wo || rd.km.km); renderSheet(); },
   rowDel: async () => { const r = db.rows.find(x => x.id === rd.id); if (!confirm(`Ta bort ${h(r.hours)} h ${r.catName}?`)) return; db.rows = db.rows.filter(x => x !== r); save(); await deleteImages(r.imageIds); closeSheet(); renderView(); toast('Borttagen'); },
@@ -1053,6 +1119,8 @@ document.addEventListener('input', e => {
     case 'lockOn': S().lock = !!val; if (st) st.lock = !!val; save(); renderHeader(); return;
     case 'themeLight': S().theme = val ? 'light' : 'dark'; if (st) st.theme = S().theme; save(); applyTheme(); return;
     case 'personSel': personFilter = val; renderWeek(); return;
+    case 'fmProject': fm.project = val; fm.sub = lastSubFor(val); renderEntry(); return; case 'fmSub': fm.sub = val; return; case 'fmHours': fm.hours = val; return; case 'fmNote': fm.note = val; return;
+    case 'fmFrom': fm.from = val; updCalc(); return; case 'fmTo': fm.to = val; updCalc(); return; case 'fmBrk': fm.brk = val; updCalc(); return;
     case 'fProject': rd.project = val; return; case 'fSub': rd.sub = val; return; case 'fMh': rd.mh = val; return;
     case 'exProject': if (ex.project !== val) { ex.project = val; ex.sub = lastSubFor(val); renderSheet(); } return; case 'exSub': ex.sub = val; return; case 'exArtNote': ex.artNote = val; return; case 'fWo': rd.wo = val; return; case 'fNote': rd.note = val; return;
     case 'dPlace': return setDay(cur, { place: val });
@@ -1077,7 +1145,7 @@ document.addEventListener('change', e => {
   if ((t.id === 'importFile' || t.id === 'inviteFile') && t.files[0]) { importAny(t.files[0]); t.value = ''; }
   if (t.matches('select,input[type=checkbox]')) t.dispatchEvent(new Event('input', { bubbles: true }));
 });
-document.addEventListener('submit', e => { if (e.target.id === 'quickForm') { e.preventDefault(); const i = $('#qIn'); if (i.value.trim()) quickSave(i.value.trim()); } });
+document.addEventListener('submit', e => { if (e.target.id === 'entry') { e.preventDefault(); fmSave(); return; } if (e.target.id === 'quickForm') { e.preventDefault(); const i = $('#qIn'); if (i.value.trim()) quickFill(i.value.trim()); } });
 document.addEventListener('toggle', e => { if (e.target.id === 'more') sheetMore = e.target.open; }, true);
 document.addEventListener('click', e => { const l = e.target.closest('label.dl'); if (l && !e.target.matches('input')) { const i = $('#dPick'); try { i.showPicker(); } catch (er) { i.focus(); } } });
 
@@ -1089,7 +1157,7 @@ document.addEventListener('click', e => { const l = e.target.closest('label.dl')
     const all = await IDB.all(); const refs = allRefs();
     for (const o of all) { if (refs.has(o.id) || Date.now() - o.created < 864e5) thumbs.set(o.id, o.thumb); else await IDB.del(o.id); }
   } catch (e) { console.warn('IndexedDB', e); }
-  renderView();
+  convertTimers(); renderView();
   const jm = location.hash.match(/#join=([A-Za-z0-9_-]+)/);
   if (jm) { history.replaceState(null, '', location.pathname); await handleJoinText('#join=' + jm[1]); }
   if (/[?&]direkt\b/.test(location.search)) $('#setup').classList.add('hidden');

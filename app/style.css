@@ -348,3 +348,25 @@ details{border-top:1px solid var(--line)}
 .startbtn{border:0;background:var(--card);color:var(--fg);font-size:var(--fs-m);font-weight:600}
 summary{font-size:var(--fs-m)}
 .quickstart small{opacity:1}
+/* ===== v4.3 – registreringsformulär ===== */
+.entry{background:var(--card);border-radius:20px;padding:var(--s2);margin:0 0 var(--s2)}
+.entry .same{background:var(--card2);margin:0 0 var(--s1)}
+.entry .lbl:first-of-type{margin-top:0}
+.entry .opt{font-weight:400;color:var(--muted)}
+.mchips{margin-top:0}
+.mchips .chip{min-height:56px;padding:0 var(--s2)}
+.fmseg{margin-top:var(--s2)}
+.grid3{display:grid;grid-template-columns:1fr 1fr 0.8fr;gap:var(--s1)}
+.grid3 input{padding:12px 8px;min-width:0}
+.calc{margin:var(--s1) 0 0;font-weight:700;font-size:var(--fs-m)!important;color:var(--fg)}
+.entry .quick{margin:var(--s1) 0 0}
+.entry textarea{min-height:56px}
+.entry .primary{margin-top:var(--s2);min-height:64px}
+#fmHours{font-size:var(--fs-l);font-weight:700;text-align:center}
+.entry input[type=time]{min-width:0;font-size:var(--fs-m);padding:12px 8px;text-align:center}
+.brkrow{display:flex;align-items:center;gap:var(--s2);margin-top:var(--s1)}
+.brkrow label{flex:1;margin:0}.brkrow input{width:104px;flex:none;text-align:center}
+.entry label.sr{font-size:0!important;margin:var(--s2) 0 0}
+input[type=time]{display:block;width:100%;font:inherit;color:var(--fg);background:var(--in);border:1.5px solid var(--line);border-radius:14px;min-height:56px;color-scheme:dark}
+:root[data-theme=light] input[type=time]{color-scheme:light}
+input[type=time]:focus{outline:none;border-color:var(--acct)}
