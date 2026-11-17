@@ -28,6 +28,59 @@ function invLongDate(s) {
   const d = parse(s);
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
+const INV_DAYS = ['Måndag', 'Tisdag', 'Onsdag', 'Torsdag', 'Fredag', 'Lördag', 'Söndag'];
+function invDayTitle(s) {
+  const d = parse(s);
+  const name = (typeof dayName === 'function') ? dayName(s) : INV_DAYS[(d.getDay() + 6) % 7];
+  return `${name} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+function hasInvPrice(p) {
+  return p !== '' && p != null && isFinite(Number(String(p).replace(',', '.'))) && String(p).trim() !== '';
+}
+function compileDaySpec(inR) {
+  if (typeof db === 'undefined' || !db) return [];
+  const rows = (db.rows || []).filter(inR).sort((a, b) => a.date.localeCompare(b.date) || (a.created || 0) - (b.created || 0));
+  const arts = (db.extras || []).filter(x => x.kind === 'article' && inR(x)).sort((a, b) => a.date.localeCompare(b.date));
+  const atas = (db.atas || []).filter(x => inR(x) && x.status === 'godkand').sort((a, b) => a.date.localeCompare(b.date) || String(a.nr).localeCompare(String(b.nr), 'sv'));
+  const dates = [...new Set([...rows, ...arts, ...atas].map(x => x.date))].sort();
+  return dates.map(date => {
+    const items = [];
+    rows.filter(r => r.date === date).forEach(r => {
+      const addons = (typeof addonText === 'function') ? addonText(r) : (r.addons || []).map(x => x.name).join(', ');
+      const proj = (typeof projSub === 'function') ? projSub(r) : (r.project || '');
+      const time = (r.time && r.time.from) ? `${r.time.from}–${r.time.to}` : '';
+      const rast = (r.time && num(r.time.brk)) ? `rast ${num(r.time.brk)} min` : '';
+      const hours = num(r.hours);
+      let missing = typeof rateFor === 'function' ? !hasInvPrice(rateFor(r.categoryId)) && hours > 0 : false;
+      (r.addons || []).forEach(x => { if (!hasInvPrice(x.price) && (x.unit ? num(x.qty) : 1)) missing = true; });
+      const amount = missing ? null : (typeof rowAmount === 'function' ? invR2(rowAmount(r)) : null);
+      items.push({ kind: 'tid', title: r.catName || 'Tid', detail: [proj, addons, rast].filter(Boolean).join('  ·  '), time, hours, qtyLabel: hours ? invQty(hours) + ' h' : '', note: (r.note || '').trim(), amount, missing });
+    });
+    arts.filter(x => x.date === date).forEach(x => {
+      const proj = (typeof projSub === 'function') ? projSub(x) : (x.project || '');
+      const def = (typeof S === 'function' ? (S().articles || []) : []).find(a => a.name.toLowerCase() === String(x.name).toLowerCase());
+      const price = def && hasInvPrice(def.price) ? num(def.price) : (hasInvPrice(x.price) ? num(x.price) : null);
+      const missing = price == null;
+      const hours = x.unit === 'h' ? num(x.qty) : 0;
+      items.push({ kind: 'artikel', title: x.name, detail: [proj, x.unit && x.unit !== 'h' ? '' : ''].filter(Boolean).join('  ·  ') || proj, time: '', hours, qtyLabel: `${invQty(x.qty)} ${x.unit || ''}`.trim(), note: (x.note || '').trim(), amount: missing ? null : invR2(price * num(x.qty)), missing });
+    });
+    atas.filter(x => x.date === date).forEach(x => {
+      const typ = (typeof ataTypeLbl === 'function' ? ataTypeLbl(x.type) : x.type) || 'ÄTA';
+      const title = `${typeof ataNo === 'function' ? ataNo(x) : 'ÄTA'}  ·  ${typ}`;
+      const desc = [x.desc, x.catName, x.orderedBy ? `beställt av ${x.orderedBy}` : ''].filter(Boolean).join('  ·  ');
+      const proj = (typeof projSub === 'function') ? projSub(x) : (x.project || '');
+      const hours = num(x.hours);
+      let amount = null, missing = false;
+      if (x.amount !== '' && x.amount != null) amount = (typeof ataAmount === 'function' ? invR2(ataAmount(x)) : invR2(num(x.amount)));
+      else if (hours && typeof rateFor === 'function' && hasInvPrice(rateFor(x.categoryId))) amount = invR2(hours * num(rateFor(x.categoryId)));
+      else if (hours) missing = true;
+      items.push({ kind: 'ata', title, detail: [desc, proj].filter(Boolean).join('  ·  '), time: '', hours, qtyLabel: hours ? invQty(hours) + ' h' : '', note: '', amount, missing });
+    });
+    const hours = invR2(items.reduce((s, it) => s + num(it.hours), 0));
+    const amount = invR2(items.reduce((s, it) => s + (it.amount != null && !it.missing ? it.amount : 0), 0));
+    return { date, title: invDayTitle(date), items, hours, amount, missing: items.some(it => it.missing) };
+  });
+}
 function invShortSpan(from, to) {
   const a = parse(from), b = parse(to);
   if (from === to) return invLongDate(from);
@@ -69,7 +122,7 @@ function nextInvoiceNo(s, date) {
   return { text: `F-${y}-${String(n).padStart(3, '0')}`, seq: n };
 }
 
-function compileInvoice({ from, to, weeks, projects, customer, date, due, ourRef, theirRef, note, no, example, seller: sellerOver }) {
+function compileInvoice({ from, to, weeks, projects, customer, date, due, ourRef, theirRef, note, no, example, daySpec, seller: sellerOver }) {
   const s = (typeof S === 'function' ? S() : {}), invs = s.invoice || defaultInvoiceSettings();
   const projFilter = projects && projects.length ? new Set(projects) : null;
   const weekSet = weeks && weeks.length ? new Set(weeks) : null;
@@ -208,7 +261,8 @@ function compileInvoice({ from, to, weeks, projects, customer, date, due, ourRef
     projects: used, projectLabel: used.length ? used.join(', ') : 'Alla projekt',
     ourRef: ourRef || invs.ourRef || s.name || '', theirRef: theirRef || buyer.ref || '',
     seller, buyer, lines, missing, subtotal, vat, vatRate: INV.VAT, total,
-    incomplete: missing.length > 0, note: note || '', example: !!example
+    incomplete: missing.length > 0, note: note || '', example: !!example,
+    daySpec: daySpec !== false, days: compileDaySpec(inR)
   };
 }
 
@@ -239,6 +293,33 @@ function exampleInvoice() {
     { kind: 'item', title: 'Markvibrator', detail: 'Exempelprojekt  ·  12–14 november 2026', qty: 8, unit: 'h', price: 75, amount: 600, missing: false, type: 'artikel' },
     { kind: 'item', title: 'ÄTA-3  ·  Tilläggsarbete', detail: 'Extra schakt vid vägtrumma, beställt av Anna Andersson  ·  Exempelprojekt  ·  13 november 2026', qty: 6, unit: 'h', price: 950, amount: 5700, missing: false, type: 'ata' }
   ];
+
+  const days = [
+    { date: '2026-11-09', title: 'Måndag 9 november', hours: 8, amount: 7800, missing: false, items: [
+      { kind: 'tid', title: 'Lastbil', detail: 'Exempelprojekt  ·  Kran 4 h  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: '', amount: 7800, missing: false }
+    ] },
+    { date: '2026-11-10', title: 'Tisdag 10 november', hours: 8, amount: 7800, missing: false, items: [
+      { kind: 'tid', title: 'Lastbil', detail: 'Exempelprojekt  ·  Kran 4 h  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: '', amount: 7800, missing: false }
+    ] },
+    { date: '2026-11-11', title: 'Onsdag 11 november', hours: 8, amount: 7800, missing: false, items: [
+      { kind: 'tid', title: 'Lastbil', detail: 'Exempelprojekt  ·  Kran 4 h  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: 'Transport av massor', amount: 7800, missing: false }
+    ] },
+    { date: '2026-11-12', title: 'Torsdag 12 november', hours: 12, amount: 8300, missing: false, items: [
+      { kind: 'tid', title: 'Grävmaskin', detail: 'Exempelprojekt  ·  schakt  ·  Rototilt  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: '', amount: 8000, missing: false },
+      { kind: 'artikel', title: 'Markvibrator', detail: 'Exempelprojekt  ·  schakt', time: '', hours: 4, qtyLabel: '4,00 h', note: '', amount: 300, missing: false }
+    ] },
+    { date: '2026-11-13', title: 'Fredag 13 november', hours: 18, amount: 14000, missing: false, items: [
+      { kind: 'tid', title: 'Grävmaskin', detail: 'Exempelprojekt  ·  schakt  ·  Rototilt  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: '', amount: 8000, missing: false },
+      { kind: 'artikel', title: 'Markvibrator', detail: 'Exempelprojekt  ·  schakt', time: '', hours: 4, qtyLabel: '4,00 h', note: '', amount: 300, missing: false },
+      { kind: 'ata', title: 'ÄTA-3  ·  Tilläggsarbete', detail: 'Extra schakt vid vägtrumma, beställt av Anna Andersson  ·  Exempelprojekt', time: '', hours: 6, qtyLabel: '6,00 h', note: '', amount: 5700, missing: false }
+    ] },
+    { date: '2026-11-16', title: 'Måndag 16 november', hours: 8, amount: 6800, missing: false, items: [
+      { kind: 'tid', title: 'Lastbil', detail: 'Exempelprojekt  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: '', amount: 6800, missing: false }
+    ] },
+    { date: '2026-11-17', title: 'Tisdag 17 november', hours: 8, amount: 8000, missing: false, items: [
+      { kind: 'tid', title: 'Grävmaskin', detail: 'Exempelprojekt  ·  schakt  ·  Rototilt  ·  rast 30 min', time: '07:00–16:00', hours: 8, qtyLabel: '8,00 h', note: '', amount: 8000, missing: false }
+    ] }
+  ];
   const subtotal = 60500, vat = 15125, total = 75625;
   return {
     no: 'F-2026-001', date: '2026-11-17', due: '2026-12-17',
@@ -247,7 +328,7 @@ function exampleInvoice() {
     projects: ['Exempelprojekt'], projectLabel: 'Exempelprojekt',
     ourRef: 'Robin Granfors', theirRef: 'Anna Andersson',
     seller, buyer, lines, missing: [], subtotal, vat, vatRate: 0.25, total,
-    incomplete: false, note: '', example: true
+    incomplete: false, note: '', example: true, daySpec: true, days
   };
 }
 
@@ -544,13 +625,13 @@ function drawPageFooter(g, inv, page, pages, isLast) {
   }
 }
 
-function drawCompactHeader(g, inv) {
+function drawCompactHeader(g, inv, label) {
   invFont(g, 18, 400, INV.logo);
   invColor(g, INV.burgundy);
   invFillText(g, inv.seller.name || 'Granfors Åkeri AB', INV.ML, INV.MT + 10);
   invFont(g, 9, 500, INV.inter);
   invColor(g, INV.ink);
-  invFillText(g, `Faktura ${inv.no}  ·  fortsättning`, INV.W - INV.MR, INV.MT + 8, 'right');
+  invFillText(g, `Faktura ${inv.no}  ·  ${label || 'fortsättning'}`, INV.W - INV.MR, INV.MT + 8, 'right');
   invRule(g, INV.ML, INV.MT + 18, INV.CW, 0.5, INV.burgundy);
   return INV.MT + 30;
 }
@@ -801,6 +882,135 @@ function drawTransport(g, cols, amount, y, kind) {
   return y + 28;
 }
 
+
+function specColLayout() {
+  const w = INV.CW, belopp = 72, timmar = 54, tid = 82, gap = 8;
+  const desc = w - (belopp + timmar + tid + gap * 3);
+  const x0 = INV.ML;
+  const xTid = x0 + desc + gap;
+  const xTimmar = xTid + tid + gap + timmar;
+  const xBelopp = xTimmar + gap + belopp;
+  return { w, desc, tid, timmar, belopp, gap, xDesc: x0, xTid, xTimmar, xBelopp };
+}
+function drawSpecTitle(g, inv, y) {
+  invFont(g, 14, 600, INV.serif);
+  invColor(g, INV.ink);
+  invFillText(g, 'Specifikation, dag för dag', INV.ML, y + 14);
+  invFont(g, 8, 400, INV.inter);
+  invColor(g, INV.muted);
+  invFillText(g, `Underlag till faktura ${inv.no}  ·  ${inv.periodLabel}`, INV.ML, y + 27);
+  invRule(g, INV.ML, y + 35, INV.CW, 0.6, INV.burgundy);
+  return y + 42;
+}
+function drawSpecHead(g, cols, y) {
+  invFont(g, 6.7, 500, INV.inter);
+  invColor(g, INV.muted);
+  invTracked(g, 'BESKRIVNING', cols.xDesc, y, 0.5);
+  invTracked(g, 'TID', cols.xTid, y, 0.5);
+  invTracked(g, 'TIMMAR', cols.xTimmar, y, 0.5, 'right');
+  invTracked(g, 'BELOPP', cols.xBelopp, y, 0.5, 'right');
+  invRule(g, INV.ML, y + 6, INV.CW, 0.5, INV.burgundy);
+  return y + 14;
+}
+function measureDayHead() { return 18; }
+function drawDayHead(g, day, y, cont) {
+  invFont(g, 9.4, 600, INV.inter);
+  invColor(g, INV.burgundy);
+  invFillText(g, cont ? `${day.title}  ·  fortsättning` : day.title, INV.ML, y + 12);
+  return y + 18;
+}
+function measureSpecItem(g, cols, it) {
+  invFont(g, 8.4, 500, INV.inter);
+  const title = invWrap(g, it.title, cols.desc, 2);
+  invFont(g, 7.2, 400, INV.inter);
+  const detail = it.detail ? invWrap(g, it.detail, cols.desc, 2) : [];
+  const note = it.note ? invWrap(g, it.note, cols.desc, 2) : [];
+  let cy = 11 + title.length * 11;
+  if (detail.length) cy += 1 + detail.length * 9;
+  if (note.length) cy += 1 + note.length * 9;
+  return Math.max(cy, 19) + 3;
+}
+function drawSpecItem(g, cols, it, y) {
+  let cy = y + 11;
+  invFont(g, 8.4, 500, INV.inter);
+  invColor(g, INV.ink);
+  const title = invWrap(g, it.title, cols.desc, 2);
+  title.forEach((tn, i) => invFillText(g, tn, cols.xDesc, cy + i * 11));
+  const mid = y + 11;
+  if (it.time) {
+    invFont(g, 7.4, 400, INV.inter);
+    invColor(g, INV.ink);
+    const tw = invWrap(g, it.time, cols.tid, 1);
+    tw.forEach((tn, i) => invFillText(g, tn, cols.xTid, mid + i * 9));
+  }
+  invFont(g, 8.4, 400, INV.inter);
+  invColor(g, INV.ink);
+  if (it.qtyLabel) invTabular(g, it.qtyLabel, cols.xTimmar, mid, 'right');
+  if (it.missing) {
+    invFont(g, 7, 500, INV.inter);
+    invColor(g, INV.burgundy);
+    invFillText(g, 'pris saknas', cols.xBelopp, mid, 'right');
+  } else if (it.amount != null) {
+    invTabular(g, invSEK(it.amount, false), cols.xBelopp, mid, 'right');
+  }
+  cy += title.length * 11;
+  if (it.detail) {
+    invFont(g, 7.2, 400, INV.inter);
+    invColor(g, INV.muted);
+    const detail = invWrap(g, it.detail, cols.desc, 2);
+    detail.forEach((tn, i) => invFillText(g, tn, cols.xDesc, cy + 1 + i * 9));
+    cy += 1 + detail.length * 9;
+  }
+  if (it.note) {
+    invFont(g, 7.2, 400, INV.inter);
+    invColor(g, INV.muted);
+    const note = invWrap(g, it.note, cols.desc, 2);
+    note.forEach((tn, i) => invFillText(g, tn, cols.xDesc, cy + 1 + i * 9));
+    cy += 1 + note.length * 9;
+  }
+  const bottom = Math.max(cy, mid + 8) + 3;
+  invRule(g, INV.ML, bottom, INV.CW, 0.3, INV.rule);
+  return bottom;
+}
+function measureDaySum() { return 16; }
+function drawDaySum(g, cols, day, y) {
+  invFont(g, 8, 500, INV.inter);
+  invColor(g, INV.ink);
+  invFillText(g, 'Dagssumma', cols.xDesc, y + 11);
+  invTabular(g, invQty(day.hours) + ' h', cols.xTimmar, y + 11, 'right');
+  if (day.missing && (day.amount == null || day.amount === 0)) {
+    invFont(g, 7, 500, INV.inter);
+    invColor(g, INV.burgundy);
+    invFillText(g, '—', cols.xBelopp, y + 11, 'right');
+  } else {
+    invFont(g, 8.4, 500, INV.inter);
+    invColor(g, INV.ink);
+    invTabular(g, invSEK(day.amount, false), cols.xBelopp, y + 11, 'right');
+  }
+  invRule(g, INV.ML, y + 16, INV.CW, 0.5, INV.rule2);
+  return y + 16;
+}
+
+function measureSpecTotal() { return 24; }
+function drawSpecTotal(g, cols, inv, y) {
+  const hours = (inv.days || []).reduce((s, d) => s + (d.hours || 0), 0);
+  const amount = (inv.days || []).reduce((s, d) => s + (d.amount || 0), 0);
+  invRule(g, INV.ML, y + 4, INV.CW, 0.6, INV.burgundy);
+  invFont(g, 8.4, 600, INV.inter);
+  invColor(g, INV.ink);
+  invFillText(g, 'Summa specifikation', cols.xDesc, y + 17);
+  const lw = invMeasure(g, 'Summa specifikation');
+  invFont(g, 7, 400, INV.inter);
+  invColor(g, INV.muted);
+  invFillText(g, 'exkl. moms', cols.xDesc + lw + 6, y + 17);
+  invFont(g, 8.4, 600, INV.inter);
+  invColor(g, INV.ink);
+  invTabular(g, invQty(hours) + ' h', cols.xTimmar, y + 17, 'right');
+  invTabular(g, invSEK(amount, false), cols.xBelopp, y + 17, 'right');
+  return y + 24;
+}
+
+
 async function buildInvoicePdf(inv) {
   await loadInvoiceFonts();
   const cols = colLayout();
@@ -865,33 +1075,129 @@ async function buildInvoicePdf(inv) {
   }
 
 
-  // Render
+  const lastInvUsedFinal = (packed[packed.length - 1].isFirst ? h1 + tableHeadH : (INV.MT + 30 + (packed[packed.length - 1].rows.length ? 28 : 0) + tableHeadH)) + packed[packed.length - 1].rows.reduce((s, r) => s + r.h, 0) + (packed[packed.length - 1].rows.length || packed[packed.length - 1].totalsOnly ? 0 : 0);
+  const lastInvEnd = (packed[packed.length - 1].isFirst ? h1 + tableHeadH : (INV.MT + 30 + (packed[packed.length - 1].transportFrom ? 28 : 0) + tableHeadH)) + packed[packed.length - 1].rows.reduce((s, r) => s + r.h, 0) + totalsH;
+
+  /* ---- Specifikation dag för dag (på som standard) ---- */
+  const wantSpec = inv.daySpec !== false && Array.isArray(inv.days) && inv.days.length;
+  const scols = specColLayout();
+  const specTitleH = 42, specHeadH = 14;
+  const specEls = [];
+  if (wantSpec) {
+    inv.days.forEach(day => {
+      const items = day.items.map(it => ({ type: 'item', it, h: measureSpecItem(scratch.g, scols, it) }));
+      const head = { type: 'day', day, h: measureDayHead(), first: true };
+      const sum = { type: 'sum', day, h: measureDaySum() };
+      specEls.push({ type: 'block', day, els: [head].concat(items, [sum]), h: head.h + items.reduce((s, it) => s + it.h, 0) + sum.h });
+    });
+  }
+  const compactSpecTop = INV.MT + 30 + specHeadH;
+  const specPages = [];
+  if (wantSpec) {
+    const roomOnInv = bodyH - lastInvEnd;
+    const startNew = roomOnInv < (specTitleH + specHeadH + 50);
+    const attachToInvoice = !startNew;
+    let pageEls = [];
+    let curY = startNew ? (INV.MT + 30 + specTitleH + specHeadH) : (lastInvEnd + 8 + specTitleH + specHeadH);
+    const flush = () => {
+      if (pageEls.length) specPages.push({ els: pageEls, attachToInvoice: specPages.length === 0 && attachToInvoice });
+      pageEls = [];
+      curY = compactSpecTop;
+    };
+    const trailing = { type: 'block', day: { title: '' }, els: [{ type: 'total', h: measureSpecTotal() }], h: measureSpecTotal() };
+    specEls.concat([trailing]).forEach(block => {
+      if (pageEls.length && curY + block.h > bodyH - 2) flush();
+      if (curY + block.h <= bodyH - 2) {
+        block.els.forEach(el => { pageEls.push(el); curY += el.h; });
+        return;
+      }
+      /* En ensam dag är högre än en sida — dela, men upprepa dagrubriken */
+      block.els.forEach(el => {
+        const needHead = el.type === 'item' && !pageEls.some(e => e.type === 'day' && e.day === block.day);
+        const extra = needHead ? measureDayHead() : 0;
+        if (pageEls.length && curY + el.h + extra > bodyH - 2) {
+          flush();
+          if (el.type !== 'day') {
+            pageEls.push({ type: 'day', day: block.day, h: measureDayHead(), first: false });
+            curY += measureDayHead();
+          }
+        }
+        pageEls.push(el);
+        curY += el.h;
+      });
+    });
+    if (pageEls.length) specPages.push({ els: pageEls, attachToInvoice: specPages.length === 0 && attachToInvoice });
+  }
+
+  const totalPages = packed.length + specPages.filter(sp => !sp.attachToInvoice).length;
+  let pageNo = 0;
+
   packed.forEach((pg, i) => {
     const { c, g } = newInvPage();
-    const isLast = i === packed.length - 1;
+    const isInvEnd = i === packed.length - 1;
+    const attach = isInvEnd && specPages[0] && specPages[0].attachToInvoice;
+    pageNo += 1;
     let y;
     if (pg.isFirst) y = drawFirstHeader(g, inv);
-    else y = drawCompactHeader(g, inv);
+    else y = drawCompactHeader(g, inv, 'fortsättning');
     y = drawTableHead(g, cols, y);
     if (!pg.isFirst && (pg.transportFrom || pg.transportFrom === 0) && i > 0) {
       y = drawTransport(g, cols, packed[i].transportFrom, y, 'from');
     }
     pg.rows.forEach((r, ri) => {
-      const line = Object.assign({}, r.line, { _last: isLast && ri === pg.rows.length - 1 });
+      const line = Object.assign({}, r.line, { _last: isInvEnd && ri === pg.rows.length - 1 });
       y = drawRow(g, cols, line, y);
     });
-    if (!isLast) {
+    if (!isInvEnd) {
       const carried = packed[i + 1] ? packed[i + 1].transportFrom : running;
       y = drawTransport(g, cols, carried, y + 4, 'to');
     } else {
       y = drawTotals(g, cols, inv, y);
+      if (wantSpec && !attach) {
+        invFont(g, 7.6, 400, INV.inter);
+        invColor(g, INV.muted);
+        invFillText(g, 'Specifikation dag för dag finns på följande sidor.', INV.ML, y + 4);
+      }
     }
-    drawPageFooter(g, inv, i + 1, packed.length, isLast);
+    if (attach) {
+      const sp = specPages[0];
+      y = drawSpecTitle(g, inv, y);
+      y = drawSpecHead(g, scols, y);
+      sp.els.forEach(el => {
+        if (el.type === 'day') y = drawDayHead(g, el.day, y, !el.first);
+        else if (el.type === 'item') y = drawSpecItem(g, scols, el.it, y);
+        else if (el.type === 'sum') y = drawDaySum(g, scols, el.day, y);
+        else if (el.type === 'total') y = drawSpecTotal(g, scols, inv, y);
+      });
+    }
+    drawPageFooter(g, inv, pageNo, totalPages, isInvEnd);
+    pages.push(c);
+  });
+
+  specPages.forEach((sp, si) => {
+    if (sp.attachToInvoice) return;
+    const { c, g } = newInvPage();
+    pageNo += 1;
+    let y = drawCompactHeader(g, inv, 'Specifikation');
+    if (si === 0 || (si === 1 && specPages[0].attachToInvoice)) {
+      /* first standalone spec page may still need the section title if this is the first spec page overall */
+      const firstStandalone = specPages.findIndex(s => !s.attachToInvoice) === si;
+      if (firstStandalone) y = drawSpecTitle(g, inv, y - 4);
+    }
+    y = drawSpecHead(g, scols, y);
+    sp.els.forEach(el => {
+      if (el.type === 'day') y = drawDayHead(g, el.day, y, !el.first);
+      else if (el.type === 'item') y = drawSpecItem(g, scols, el.it, y);
+      else if (el.type === 'sum') y = drawDaySum(g, scols, el.day, y);
+      else if (el.type === 'total') y = drawSpecTotal(g, scols, inv, y);
+    });
+    const isLast = pageNo === totalPages;
+    drawPageFooter(g, inv, pageNo, totalPages, false);
     pages.push(c);
   });
 
   const blob = await canvasesToPdf(pages);
-  blob.__pages = pages; // for preview / PNG
+  blob.__pages = pages;
   return blob;
 }
 
@@ -907,3 +1213,5 @@ window.loadInvoiceFonts = loadInvoiceFonts;
 window.buildInvoicePdf = buildInvoicePdf;
 window.invVatFromOrg = invVatFromOrg;
 window.invLongDate = invLongDate;
+window.invDayTitle = invDayTitle;
+window.compileDaySpec = compileDaySpec;

@@ -429,3 +429,17 @@ main{padding-right:calc(var(--side) + env(safe-area-inset-right,0px))}
 .inv-prev{background:#fff;border-radius:10px;overflow:hidden;margin:12px 0;box-shadow:var(--shadow)}
 .inv-prev canvas,.inv-prev img{width:100%;height:auto;display:block;background:#fff}
 .custed .grid2{margin-top:8px}
+
+/* v4.5.1 kompakt dag-för-dag i fakturavyn (PDF-specifikationen är huvudsaken) */
+.inv-check{display:flex;align-items:flex-start;gap:10px;margin:12px 0 0;font-size:14px;line-height:1.35;font-weight:600}
+.inv-check input{width:20px;height:20px;margin:2px 0 0;flex:none;accent-color:var(--acct)}
+.inv-days-card{padding:12px 14px}
+.inv-day{padding:7px 0;border-bottom:1px solid var(--line)}
+.inv-day:last-child{border-bottom:0;padding-bottom:0}
+.inv-dhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;margin:0 0 3px}
+.inv-dhead b{font-weight:700}
+.inv-dhead span{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px}
+.inv-ditem{padding:1px 0;font-size:13px;line-height:1.35}
+.inv-ditem .t{font-weight:600}
+.inv-ditem .d,.inv-ditem .n{display:block;color:var(--muted);font-size:12px}
+.inv-ditem .m{display:block;color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px}

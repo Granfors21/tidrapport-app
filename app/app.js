@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.5.0';
+const VERSION = '4.5.1';
 const BRAND = 'Granfors Åkeri AB';
 const brand = () => (db && db.settings && db.settings.company) || BRAND;
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
@@ -1076,7 +1076,7 @@ function defaultInvForm() {
     date: today(), due: ymd(addDays(today(), dueDays)),
     ourRef: (S().invoice || {}).ourRef || S().name || (ME().name || ''),
     theirRef: (custs.find(c => c.id === (custs[0] || {}).id) || {}).ref || '',
-    note: '', preview: null
+    note: '', preview: null, daySpec: true
   };
 }
 function weeksAvail(n = 12) {
@@ -1107,7 +1107,8 @@ function invDraft() {
   return compileInvoice({
     from: r.from, to: r.to, weeks: invForm.mode === 'weeks' ? r.weeks : null,
     projects: invForm.projects, customer: c, date: invForm.date, due: invForm.due,
-    ourRef: invForm.ourRef, theirRef: invForm.theirRef || (c && c.ref) || '', note: invForm.note, no
+    ourRef: invForm.ourRef, theirRef: invForm.theirRef || (c && c.ref) || '', note: invForm.note, no,
+    daySpec: invForm.daySpec !== false
   });
 }
 function invMissingSetup(inv) {
@@ -1141,6 +1142,20 @@ async function invWarnOrGo(inv, fn) {
   const file = await fn(inv);
   return file;
 }
+
+function invDaysHtml(inv) {
+  const days = inv.days || [];
+  if (!days.length) return '';
+  const rows = days.map(d => {
+    const items = (d.items || []).map(it => {
+      const meta = [it.time, it.qtyLabel, it.missing ? 'pris saknas' : (it.amount != null ? invSEK(it.amount, false) : '')].filter(Boolean).join(' · ');
+      return `<div class="inv-ditem"><span class="t">${esc(it.title)}</span>${it.detail ? `<span class="d">${esc(it.detail)}</span>` : ''}${it.note ? `<span class="n">${esc(it.note)}</span>` : ''}${meta ? `<span class="m">${esc(meta)}</span>` : ''}</div>`;
+    }).join('');
+    const tot = (d.missing && !d.amount) ? '—' : invSEK(d.amount, false);
+    return `<div class="inv-day"><div class="inv-dhead"><b>${esc(d.title)}</b><span>${esc(invQty(d.hours) + ' h')} · ${esc(tot)}</span></div>${items}</div>`;
+  }).join('');
+  return `<div class="card inv-days-card"><div class="lbl">Dag för dag</div>${rows}</div>`;
+}
 function renderInv() {
   if (!invForm) invForm = defaultInvForm();
   if (typeof ensureInvoiceSettings === 'function') ensureInvoiceSettings(S());
@@ -1170,6 +1185,7 @@ function renderInv() {
     <div class="grid2"><label>Fakturadatum<input type="date" id="invDate" value="${esc(invForm.date)}"></label><label>Förfallodag<input type="date" id="invDue" value="${esc(invForm.due)}"></label></div>
     <div class="grid2"><label>Vår referens<input type="text" id="invOur" value="${esc(invForm.ourRef)}"></label><label>Er referens<input type="text" id="invTheir" value="${esc(invForm.theirRef)}"></label></div>
     <label>Meddelande på fakturan <span class="opt">valfritt</span><input type="text" id="invNote" value="${esc(invForm.note)}" placeholder="t.ex. enligt överenskommelse"></label>
+    <label class="inv-check"><input type="checkbox" id="invDaySpec" ${invForm.daySpec !== false ? 'checked' : ''}>Ta med dag-för-dag-specifikation på fakturan</label>
   </div>
   ${inv.missing.length ? `<div class="inv-warn">Pris saknas på ${inv.missing.length} rad${inv.missing.length > 1 ? 'er' : ''}<span>${esc(inv.missing.join(', '))} — fyll i timpris under ⚙ → Resurser, eller skapa PDF med tydlig varning.</span></div>` : ''}
   ${invMissingSetup(inv).length ? `<div class="inv-warn">Fakturauppgifter saknas<span>${esc(invMissingSetup(inv).join(', '))} — fyll i under ⚙. Fälten lämnas tomma tills du skriver in dem.</span></div>` : ''}
@@ -1178,7 +1194,8 @@ function renderInv() {
     ${inv.lines.length ? `<table class="inv-lines"><thead><tr><th>Beskrivning</th><th class="n">Antal</th><th>Enh.</th><th class="n">À-pris</th><th class="n">Belopp</th></tr></thead><tbody>${lineRows}</tbody></table>
     <p style="text-align:right;margin:10px 0 0;font-variant-numeric:tabular-nums"><span class="muted">Delsumma ${esc(invSEK(inv.subtotal, false))} · Moms 25 % ${esc(invSEK(inv.vat, false))}</span><br><b>Att betala ${esc(invSEK(inv.total, true))}</b></p>` : '<p class="muted">Inga timmar, artiklar eller godkända ÄTA i urvalet.</p>'}
   </div>
-  <div id="invPrevWrap">${invForm.preview ? `<div class="inv-prev"><img id="invPrevImg" alt="Förhandsvisning av faktura"></div>` : ''}</div>
+  ${invDaysHtml(inv)}
+  <div id="invPrevWrap">${invForm.preview ? `<div class="inv-prev"><img id="invPrevImg" alt="Förhandsvisning av faktura"></div>${invForm.daySpec !== false ? '<p class="muted small">Sidan 1. Dag-för-dag-specifikationen finns på följande sidor i PDF:en.</p>' : ''}` : ''}</div>
   <button class="primary" data-act="invShare" id="invShareBtn"${inv.lines.length ? '' : ' disabled'}>Dela faktura</button>
   <div class="grid2" style="margin-top:8px"><button class="secondary" data-act="invPreview">Förhandsvisa</button><button class="secondary" data-act="invPdf">Spara PDF</button></div>
   ${issued.length ? `<div class="card" style="margin-top:16px"><h2>Tidigare fakturor</h2><ul class="week">${issued.map(x => `<li><div class="wl"><span>${esc(x.no)} · ${esc(x.customer || '')}<small class="muted" style="display:block">${esc(x.date)} · ${esc(invSEK(x.total, true))}</small></span></div></li>`).join('')}</ul></div>` : ''}
@@ -1350,6 +1367,7 @@ document.addEventListener('input', e => {
     case 'invOur': invForm.ourRef = val; return;
     case 'invTheir': invForm.theirRef = val; return;
     case 'invNote': invForm.note = val; return;
+    case 'invDaySpec': invForm.daySpec = !!val; invForm.preview = null; return;
     case 'invFrom': invForm.from = val; invForm.preview = null; renderInv(); return;
     case 'invTo': invForm.to = val; invForm.preview = null; renderInv(); return;
   }
