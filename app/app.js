@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.1.0';
+const VERSION = '4.2.0';
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -74,6 +74,8 @@ function load() {
   return emptyDb();
 }
 let db = ensureTeam(load());
+/* Ny användare: rakt in i appen – ingen välkomst, inget namn, ingen PIN (kan slås på i ⚙). */
+if (!db.settings.setupDone) { db.settings.setupDone = true; db.settings.lock = false; ensureTeam(db); try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) {} }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { alert('Kunde inte spara – lagringen är full. Ta backup och rensa gamla bilder.'); } }
 if (db.settings.setupDone && localStorage.getItem(KEY)) save();
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -182,7 +184,7 @@ function renderToday() {
   </div>
   ${cur !== today() ? '<button class="link" data-act="dToday">← Till idag</button>' : ''}
   ${myTimer() ? (() => { const t = myTimer(), c = catById(t.categoryId) || { icon: '⏱️', name: 'Klocka' }; return `<div class="timer" id="timerCard"><div><i>${esc(c.icon)}</i><span><b>${esc(c.name)} pågår</b><small>start ${new Date(t.start).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })} · ${esc(t.project)}</small></span><em id="timerElapsed">${fmtElapsed(Date.now() - t.start)}</em></div><button class="stop" data-act="timerStop" id="stopBtn">■ Stoppa och spara</button></div>`; })() : ''}
-  ${!myTimer() && lastCatFor() ? (() => { const c = lastCatFor(), pj = lastProjectFor(cur); return `<button class="quickstart" data-act="timerQuick" id="quickStart">Starta ${esc(c.name)}<small>${esc(pj || '')}</small></button>`; })() : ''}
+  ${!myTimer() ? (() => { const c = lastCatFor(), pj = lastProjectFor(cur); return `<button class="quickstart" data-act="timerQuick" id="quickStart">${c ? 'Starta ' + esc(c.name) : 'Starta'}<small>${c ? esc(pj || '') : 'Välj maskin och klockan går'}</small></button>`; })() : ''}
   ${rows.length || devs.length || atas.length || exs.length ? `<div class="daycard">
       ${rows.length ? `<div class="dtot"><b id="dayTotal">${h(tot)} h</b><span>${tot > lim ? `<span class="ot">varav ${h(tot - lim)} h övertid</span>` : 'sparat ✓'}</span></div>` : ''}
       <ul class="rows" id="dayList">${rows.map(r => `<li><button class="rowbtn" data-act="rowEdit" data-v="${r.id}"><i>${r.catIcon || '⏱️'}</i><span><b>${esc(r.catName)}</b><small>${esc(rowSub(r))}${r.imageIds?.length ? ` · 📷${r.imageIds.length}` : ''}</small></span><em>${h(r.hours)}</em></button></li>`).join('')}
@@ -226,7 +228,8 @@ function closeSheet(fromPop) {
   if (!fromPop && history.state && history.state.sheet) history.back();
 }
 addEventListener('popstate', () => closeSheet(true));
-function renderSheet() { if (!sheet) return; $('#sheetBody').innerHTML = { row: sheetRow, dev: sheetDev, ata: sheetAta, extra: sheetExtra, team: sheetTeam }[sheet](); if (sheet === 'team') fillQr(); }
+function renderSheet() { if (!sheet) return; $('#sheetBody').innerHTML = { row: sheetRow, dev: sheetDev, ata: sheetAta, extra: sheetExtra, team: sheetTeam, pick: sheetPick }[sheet](); if (sheet === 'team') fillQr(); }
+const sheetPick = () => `${head('', 'Starta', 'Välj maskin – klockan startar direkt')}<div class="cats" id="pickCats">${S().categories.map(c => `<button class="cat" data-act="pickStart" data-v="${c.id}">${esc(c.name)}</button>`).join('')}</div>`;
 const head = (icon, title, sub) => `<div class="sh-head"><i>${icon}</i><div><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</div><button class="x" data-act="close" aria-label="Stäng">✕</button></div>`;
 function newRowDraft(catId) {
   const rem = (num(S().otLimit) || 8) - dayTotal(cur);
@@ -549,7 +552,7 @@ function saveSettings() {
   st.materials = st.materials.filter(m => m.name.trim()); st.articles = st.articles.filter(m => m.name.trim());
   if (!st.projects.length) st.projects = ['Allmänt'];
   if (!st.projects.includes(st.defaultProject)) st.defaultProject = st.projects[0];
-  db.settings = st; const pr = db.profiles.find(x => x.id === ME().id); if (pr && st.name) { pr.name = st.name; } if (db.company && db.company.role === 'owner' && st.company) db.company.name = st.company; save(); st = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
+  db.settings = st; const pr = db.profiles.find(x => x.id === ME().id); if (pr && st.name && pr.name !== st.name) { pr.name = st.name; ['rows', 'devs', 'atas', 'extras'].forEach(k => db[k].forEach(x => { if (x.by === pr.id) x.byName = st.name; })); } if (db.company && db.company.role === 'owner') db.company.name = st.company || ''; save(); st = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
 }
 
 /* ================= Export ================= */
@@ -603,8 +606,8 @@ function slug(s) { return String(s || 'x').toLowerCase().normalize('NFD').replac
 function ensureTeam(d) {
   d.profiles = Array.isArray(d.profiles) ? d.profiles : []; d.company = d.company || null; d.team = d.team || {}; d.timers = d.timers || {};
   d.settings.subprojects = d.settings.subprojects || {};
-  if (!d.profiles.length && d.settings.setupDone) d.profiles.push({ id: uid(), name: d.settings.name || 'Ägare', role: 'owner', created: Date.now() });
-  if (!d.company && d.settings.setupDone) d.company = { id: newCompanyId(), name: d.settings.company || 'Mitt företag', role: 'owner' };
+  if (!d.profiles.length && d.settings.setupDone) d.profiles.push({ id: uid(), name: d.settings.name || '', role: 'owner', created: Date.now() });
+  if (!d.company && d.settings.setupDone) d.company = { id: newCompanyId(), name: d.settings.company || '', role: 'owner' };
   const first = d.profiles[0];
   if (first) ['rows', 'devs', 'atas', 'extras'].forEach(k => d[k].forEach(x => { if (!x.by) { x.by = first.id; x.byName = first.name; } }));
   return d;
@@ -641,7 +644,7 @@ async function pinDigit(n) {
   } else if (pinMode === 'set1') { pinFirst = pin; pinMode = 'set2'; renderLock(); }
   else if (pinMode === 'set2') {
     if (pin !== pinFirst) { pinMode = 'set1'; return renderLock('PIN matchade inte – börja om'); }
-    const p = db.profiles.find(x => x.id === ME().id); p.salt = newSalt(); p.pinHash = await hashPin(pin, p.salt); save();
+    const p = db.profiles.find(x => x.id === ME().id); p.salt = newSalt(); p.pinHash = await hashPin(pin, p.salt); S().lock = true; if (st) st.lock = true; save(); renderHeader();
     $('#lock').classList.add('hidden'); pinMode = null; toast('PIN sparad ✓'); if (view === 'set') renderSet();
   }
 }
@@ -726,10 +729,11 @@ function qrCanvas(text, px = 6) {
 }
 async function handleInviteObj(inv) {
   if (!inv || inv.t !== 'tr-inv') return toast('Ingen inbjudan hittades');
-  if (!S().setupDone) { pendingInvite = inv; setupStage = 'member'; renderSetup(); return; }
+  const fresh = !['rows', 'devs', 'atas', 'extras'].some(k => db[k].length);
   if (db.company && db.company.role === 'owner' && db.company.id === inv.c) return toast('Det här är din egen inbjudan');
-  if (db.company && db.company.id !== inv.c && !confirm(`Byta till företaget ${inv.n}? Dina egna poster behålls.`)) return;
-  applyInvite(inv); save(); renderHeader(); renderView(); toast(`Uppdaterat från ${inv.n}: projekt, maskiner och artiklar ✓`);
+  if (db.company && db.company.id !== inv.c && !fresh && !confirm(`Byta till företaget ${inv.n}? Dina egna poster behålls.`)) return;
+  const was = db.company && db.company.id === inv.c; applyInvite(inv); const me = db.profiles.find(x => x.id === ME().id); if (me && !was) me.role = 'employee';
+  save(); $('#setup').classList.add('hidden'); renderHeader(); renderView(); toast(was ? `Uppdaterat från ${inv.n}: projekt, maskiner och artiklar ✓` : `Ansluten till ${inv.n} ✓`);
 }
 async function handleJoinText(txt) {
   const m = String(txt || '').match(/#join=([A-Za-z0-9_-]+)/) || String(txt || '').trim().match(/^([A-Za-z0-9_-]{20,})$/);
@@ -756,7 +760,10 @@ async function shareFile(file, title, text) {
   download(file.name, file, file.type); return 'downloaded';
 }
 /* ---- Anställd → ägare ---- */
+async function ensureName() { if (ME().name) return; const n = (prompt('Ditt namn (visas på rapporten) – kan lämnas tomt:') || '').trim(); if (!n) return; setMyName(n); }
+function setMyName(n) { const me = db.profiles.find(x => x.id === ME().id); if (!me) return; me.name = n; S().name = n; ['rows', 'devs', 'atas', 'extras'].forEach(k => db[k].forEach(x => { if (x.by === me.id) x.byName = n; })); save(); renderHeader(); }
 async function exportMine(all) {
+  await ensureName();
   const sent = new Set(all ? [] : JSON.parse(localStorage.getItem(SENT_KEY) || '[]'));
   const recs = { rows: db.rows.filter(mine), devs: db.devs.filter(mine), atas: db.atas.filter(mine), extras: db.extras.filter(mine) };
   const ids = new Set(); Object.values(recs).flat().forEach(x => (x.imageIds || []).forEach(i => ids.add(i)));
@@ -807,8 +814,10 @@ function sheetTeam() {
     <p class="muted small">Anställda skannar koden med appen (⚙ → Anslut) eller telefonens kamera. Koden innehåller företags-ID, projekt, underprojekt, maskiner och artiklar – inga tider.</p>
     <div class="qrbox"><img id="qrImg" alt="QR-kod för inbjudan"></div>
     <button class="primary" data-act="shareInvite" id="shareInvite">Skicka inbjudan / uppdatering</button>
+    ${db.company && !db.company.name ? '<p class="notice">Skriv företagsnamnet under ⚙ → Företag först, så ser de anställda det.</p>' : ''}
     <button class="secondary" data-act="copyInvite">Kopiera länk</button>
     <label class="secondary filebtn">Läs in fil från anställd<input type="file" id="importFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>
+    <button class="ghost" data-act="suMember" id="joinOther">Är du anställd? Anslut till ett annat företag</button>
     ${ppl.length ? `<div class="sect">Personer</div><ul class="rows">${ppl.map(p => `<li><div class="rowbtn"><i>👷</i><span><b>${esc(p.name)}</b><small>${db.rows.filter(r => r.by === p.id).length} rader${db.team[p.id] ? ` · senast inläst ${new Date(db.team[p.id].last).toLocaleString('sv-SE')}` : ''}</small></span></div></li>`).join('')}</ul>` : ''}`;
   return `${head('👥', 'Team', esc(`${db.company.name} · ${db.company.id}`))}
     <p class="muted small">Du är ansluten som anställd. Skicka dina poster till ägaren som fil (Gmail, sms, WhatsApp …).</p>
@@ -908,6 +917,7 @@ async function buildPdf(r, R) {
 async function weekPdfFile() { const r = range(), R = report(r.from, r.to); const blob = await buildPdf(r, R); const w = repMode === 'week' ? `v${wk.week}-${wk.year}` : `${mo.y}-${pad(mo.m + 1)}`; return { file: new File([blob], `Tidrapport-${w}${personFilter !== 'all' ? '-' + slug((people().find(p => p.id === personFilter) || {}).name) : ''}.pdf`, { type: 'application/pdf' }), r, R }; }
 let openMail = u => { location.href = u; };
 async function sendWeek() {
+  await ensureName();
   toast('Skapar PDF…');
   const { file, r, R } = await weekPdfFile();
   const subject = repMode === 'week' ? `Tidrapport vecka ${wk.week}` : `Tidrapport ${MONTHS[mo.m]} ${mo.y}`;
@@ -1002,7 +1012,7 @@ const ACT = {
   repNext: () => { if (repMode === 'week') wk = isoWeek(addDays(mondayOf(wk.year, wk.week), 7)); else { mo.m++; if (mo.m > 11) { mo.m = 0; mo.y++; } } renderWeek(); },
   print: doPrint, share,
   setupDone: finishSetup, joinDone: finishJoin,
-  suOwner: () => { setupStage = 'owner'; renderSetup(); }, suMember: () => { setupStage = 'member'; renderSetup(); }, suBack: () => { setupStage = 'choose'; pendingInvite = null; renderSetup(); },
+  suOwner: () => { setupStage = 'owner'; renderSetup(); }, suMember: () => { setupStage = 'member'; renderSetup(); }, suBack: () => { setupStage = 'choose'; pendingInvite = null; if (S().setupDone) $('#setup').classList.add('hidden'); else renderSetup(); },
   scanQr: startScan, scanClose: stopScan, inviteFromText: () => handleJoinText($('#inviteCode').value),
   pinKey: el => pinDigit(el.dataset.v), pinBack: () => { pinBuf = pinBuf.slice(0, -1); $$('#pinDots i').forEach((d, i) => d.classList.toggle('on', i < pinBuf.length)); },
   pinWho: el => { pinProfile = db.profiles.find(p => p.id === el.dataset.v); pinBuf = ''; renderLock(); },
@@ -1014,7 +1024,8 @@ const ACT = {
   switchPerson: () => { if (db.profiles.some(p => p.pinHash) && S().lock) return showLock(); const names = db.profiles.map((p, i) => `${i + 1}. ${p.name}`).join('\n'); const i = num(prompt('Byt till:\n' + names)) - 1; if (db.profiles[i]) { localStorage.setItem(ME_KEY, db.profiles[i].id); save(); renderHeader(); st = null; renderSet(); } },
   openTeam: () => openSheet('team'), shareInvite, copyInvite: async () => { if (!inviteCode) inviteCode = await packJson(invitePayload()); try { await navigator.clipboard.writeText(inviteUrl(inviteCode)); toast('Länken kopierad'); } catch (e) { prompt('Kopiera länken:', inviteUrl(inviteCode)); } },
   sendOwner: () => exportMine(false), sendOwnerAll: () => exportMine(true),
-  timerQuick: () => { const c = lastCatFor(); if (!c) return; const pj = lastProjectFor(cur) || S().defaultProject, lr = [...db.rows].filter(r => mine(r) && r.categoryId === c.id).sort((x, y) => (y.created || 0) - (x.created || 0))[0], ad = {}; ((lr && lr.addons) || []).forEach(x => ad[x.id] = x.unit ? x.qty : ''); rd = { categoryId: c.id, project: pj, sub: lastSubFor(pj) || '', addons: ad }; startTimer(); },
+  pickStart: el => { S().lastCat = el.dataset.v; const pj = lastProjectFor(cur) || S().defaultProject; rd = { categoryId: el.dataset.v, project: pj, sub: lastSubFor(pj) || '', addons: {} }; startTimer(); },
+  timerQuick: () => { const c = lastCatFor(); if (!c) return openSheet('pick'); const pj = lastProjectFor(cur) || S().defaultProject, lr = [...db.rows].filter(r => mine(r) && r.categoryId === c.id).sort((x, y) => (y.created || 0) - (x.created || 0))[0], ad = {}; ((lr && lr.addons) || []).forEach(x => ad[x.id] = x.unit ? x.qty : ''); rd = { categoryId: c.id, project: pj, sub: lastSubFor(pj) || '', addons: ad }; startTimer(); },
   goWeek: () => show('week'),
   timerStart: startTimer, timerStop: () => stopTimer(false),
   sendWeek, pdfDownload: async () => { toast('Skapar PDF…'); const { file } = await weekPdfFile(); download(file.name, file, 'application/pdf'); toast('PDF sparad ✓'); },
@@ -1081,8 +1092,8 @@ document.addEventListener('click', e => { const l = e.target.closest('label.dl')
   renderView();
   const jm = location.hash.match(/#join=([A-Za-z0-9_-]+)/);
   if (jm) { history.replaceState(null, '', location.pathname); await handleJoinText('#join=' + jm[1]); }
-  if (!S().setupDone && !pendingInvite) renderSetup();
-  else if (lockActive()) showLock();
+  if (/[?&]direkt\b/.test(location.search)) $('#setup').classList.add('hidden');
+  if (lockActive()) showLock();
 })();
 window.addEventListener('hashchange', () => { const m = location.hash.match(/#join=([A-Za-z0-9_-]+)/); if (m) { history.replaceState(null, '', location.pathname); handleJoinText('#join=' + m[1]); } });
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
