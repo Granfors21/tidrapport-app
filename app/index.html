@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#121417">
+<meta name="theme-color" content="#1C1C1C">
 <meta name="color-scheme" content="dark">
 <meta name="description" content="Enkel tidrapport för maskin, åkeri och anläggning – fungerar offline.">
 <title>Tidrapport</title>
@@ -13,8 +13,9 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="sidebrand" id="sideBrand" aria-hidden="true"><span id="sideBrandText">Granfors Åkeri AB</span></div>
 <div id="app">
-  <header class="top"><div class="logo" id="logo">Granfors Åkeri AB</div><div class="sub" id="topSub"></div><button class="prof" id="profBtn" aria-label="Konto (valfritt)">👤</button></header>
+  <header class="top"><div class="sub" id="topSub"></div><button class="prof" id="profBtn" aria-label="Konto (valfritt)">👤</button></header>
   <main>
     <section id="view-today" class="view active"></section>
     <section id="view-week" class="view"></section>
