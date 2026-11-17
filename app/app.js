@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.4.0';
+const VERSION = '4.4.1';
 const BRAND = 'Granfors Åkeri AB';
 const brand = () => (db && db.settings && db.settings.company) || BRAND;
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
@@ -247,7 +247,7 @@ function sheetRow() {
   return `${head(esc(cat.icon), esc(cat.name), `${esc(projSub(rd))} · ${fmtDate(cur)}`)}
   <div class="bighours"><button class="pm" data-act="hMinus" aria-label="Minska">−</button><div><b id="hOut">${h(rd.hours)}</b><span>timmar</span></div><button class="pm" data-act="hPlus" aria-label="Öka">+</button></div>
   <div class="quick">${[4, 6, 8, 10].map(v => `<button data-act="hSet" data-v="${v}" class="${num(rd.hours) === v ? 'sel' : ''}">${v}</button>`).join('')}</div>
-  ${cat.addons.length ? `<div class="chips" id="addonChips">${shown.map(x => `<button class="chip ${x.id in rd.addons ? 'sel' : ''}" data-act="addon" data-v="${x.id}">${esc(x.name)}</button>`).join('')}${!sheetAll && ordered.length > shown.length ? `<button class="chip more" data-act="allAddons">Fler…</button>` : ''}</div>
+  ${cat.addons.length ? `<div class="addon-grid" id="addonChips">${ordered.map(x => `<button type="button" class="addonbtn ${x.id in rd.addons ? 'sel' : ''}" data-act="addon" data-v="${x.id}"><span>${addonLabel(x.name)}</span></button>`).join('')}</div>
   <div class="qtys">${cat.addons.filter(x => x.unit && x.id in rd.addons).map(x => `<div class="qty"><span>${esc(x.name)}</span><input type="number" inputmode="decimal" step="0.5" min="0" data-q="${x.id}" value="${rd.addons[x.id]}"><em>${x.unit}</em></div>`).join('')}</div>` : ''}
   <details id="more" ${sheetMore ? 'open' : ''}><summary>Mer${rd.imageIds.length ? ` · 📷${rd.imageIds.length}` : ''}${rd.note ? ' · ✎' : ''}</summary>
     <div class="grid2"><label>Projekt<select id="fProject">${projOptions(rd.project)}</select></label><label>Underprojekt<input type="text" id="fSub" list="subListR" value="${esc(rd.sub)}"></label></div><datalist id="subListR">${subOptions(rd.project).map(s => `<option value="${esc(s)}">`).join('')}</datalist>
@@ -963,6 +963,7 @@ function entryState() {
 const toMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? num(m[1]) * 60 + num(m[2]) : null; };
 function clockHours(f) { const a = toMin(f.from), b = toMin(f.to); if (a === null || b === null) return 0; let d = b - a; if (d <= 0) d += 1440; d -= num(f.brk); return Math.max(0, Math.round(d / 60 * 100) / 100); }
 function updCalc() { const el = $('#fmCalc'); if (el) { const v = clockHours(fm); el.textContent = v ? `= ${h(v)} h` : 'Ange från och till'; } }
+const addonLabel = n => esc(n).replace(/\//g, '/<wbr>').replace(/(.{5,})(skopa|hammare|grip|gafflar|släp|aggregat|vals|blad|tilt|krok|tid|styrning)/gi, '$1<wbr>$2');
 function entryHtml(prev, prevRows) {
   const f = entryState(), cats = S().categories, cat = catById(f.categoryId);
   const sameLbl = prev ? (prev === ymd(addDays(cur, -1)) ? 'Samma som igår' : 'Samma som ' + fmtDate(prev)) : '';
@@ -970,6 +971,7 @@ function entryHtml(prev, prevRows) {
   return `${prevRows && prevRows.length && !dayRows(cur).length ? `<button type="button" class="same" data-act="fillPrev" id="sameBtn"><b>${sameLbl}</b><span>${h(dayTotal(prev))} h · ${esc([...new Set(prevRows.map(r => r.catName))].join(' + '))} · ${esc([...new Set(prevRows.map(r => r.project))].join(', '))}</span></button>` : ''}
   <div class="lbl">Maskin <span class="opt">valfritt</span></div>
   <div class="chips mchips" id="fmCats">${cats.map(c => `<button type="button" class="chip ${f.categoryId === c.id ? 'sel' : ''}" data-act="fmCat" data-v="${c.id}">${esc(c.name)}</button>`).join('')}</div>
+  ${cat && cat.addons.length ? `<div class="lbl">Tillägg / redskap <span class="opt">valfritt</span></div><div class="addon-grid" id="fmAddons">${cat.addons.map(x => `<button type="button" class="addonbtn${f.addons.includes(x.id) ? ' sel' : ''}" data-act="fmAddon" data-v="${x.id}"><span>${addonLabel(x.name)}</span></button>`).join('')}</div>` : ''}
   <div class="grid2"><label>Projekt<select id="fmProject">${projOptions(f.project)}</select></label><label>Delprojekt<input type="text" id="fmSub" list="fmSubList" value="${esc(f.sub)}" placeholder="valfritt"></label></div>
   <datalist id="fmSubList">${subOptions(f.project).map(x => `<option value="${esc(x)}">`).join('')}</datalist>
   <div class="seg fmseg" id="fmMode"><button type="button" data-act="fmMode" data-v="hours" class="${f.mode === 'hours' ? 'on' : ''}">Timmar</button><button type="button" data-act="fmMode" data-v="clock" class="${f.mode === 'clock' ? 'on' : ''}">Klockslag</button></div>
@@ -1035,7 +1037,7 @@ const ACT = {
   dPrev: () => goDate(ymd(addDays(cur, -1))), dNext: () => goDate(ymd(addDays(cur, 1))), dToday: () => goDate(today()),
   goDate: el => goDate(el.dataset.v),
   openDay: el => { cur = el.dataset.v; undoIds = null; show('today'); },
-  copyPrev, fillPrev, fmSave, fmCat: el => { fm.categoryId = fm.categoryId === el.dataset.v ? '' : el.dataset.v; fm.addons = []; renderEntry(); }, fmMode: el => { fm.mode = el.dataset.v; renderEntry(); }, fmH: el => { fm.hours = el.dataset.v; renderEntry(); },
+  copyPrev, fillPrev, fmSave, fmCat: el => { fm.categoryId = fm.categoryId === el.dataset.v ? '' : el.dataset.v; fm.addons = []; renderEntry(); }, fmAddon: el => { const id = el.dataset.v, i = fm.addons.indexOf(id); if (i >= 0) fm.addons.splice(i, 1); else fm.addons.push(id); renderEntry(); }, fmMode: el => { fm.mode = el.dataset.v; renderEntry(); }, fmH: el => { fm.hours = el.dataset.v; renderEntry(); },
   undo: () => { db.rows = db.rows.filter(r => !undoIds.includes(r.id)); db.extras = db.extras.filter(x => !undoIds.includes(x.id)); undoIds = null; save(); renderToday(); toast('Ångrat'); },
   cat: el => { rd = newRowDraft(el.dataset.v); openSheet('row'); },
   rowEdit: el => { rd = rowToDraft(byId(db.rows, el)); openSheet('row'); sheetMore = !!(rd.note || rd.materials.length || rd.imageIds.length || rd.wo || rd.km.km); renderSheet(); },
