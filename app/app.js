@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.0.0';
+const VERSION = '4.1.0';
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -47,7 +47,7 @@ const DEV_TYPES = [['sakerhet', 'Säkerhet/tillbud', '⛑️'], ['haveri', 'Mask
 const ATA_STATUS = [['begard', 'Begärd'], ['godkand', 'Godkänd'], ['fakturerad', 'Fakturerad']];
 const UNITS = ['', 'h', 'st', 'km', 'l', 'm', 'ton'];
 function defaultSettings() {
-  return { company: '', name: '', rate: '', otLimit: 8, defBreak: 30, projects: ['Allmänt'], defaultProject: 'Allmänt', categories: defaultCategories(), materials: clone(DEFAULT_MATERIALS), articles: clone(DEFAULT_ARTICLES), lastCat: '', lock: false, recipients: '', subprojects: {}, gps: false };
+  return { company: '', name: '', rate: '', otLimit: 8, defBreak: 30, projects: ['Allmänt'], defaultProject: 'Allmänt', categories: defaultCategories(), materials: clone(DEFAULT_MATERIALS), articles: clone(DEFAULT_ARTICLES), lastCat: '', lock: false, recipients: '', subprojects: {}, gps: false, theme: 'dark' };
 }
 
 /* ================= Lagring ================= */
@@ -121,8 +121,8 @@ async function deleteImage(id) {
 async function deleteImages(ids) { for (const id of ids || []) { thumbs.delete(id); await IDB.del(id); } }
 function photoWidget(ctx, ids) {
   return `<div class="lbl">Bilder</div><div class="photobtns">
-    <label>📷 Ta foto<input type="file" accept="image/*" capture="environment" data-photo="${ctx}"></label>
-    <label>🖼️ Galleri<input type="file" accept="image/*" multiple data-photo="${ctx}"></label></div>
+    <label>Ta foto<input type="file" accept="image/*" capture="environment" data-photo="${ctx}"></label>
+    <label>Galleri<input type="file" accept="image/*" multiple data-photo="${ctx}"></label></div>
     <div class="photos" id="photos-${ctx}">${thumbsHtml(ids)}</div>`;
 }
 const thumbsHtml = ids => (ids || []).map(id => `<img src="${thumbs.get(id) || ''}" data-img="${id}" alt="Bild">`).join('');
@@ -182,6 +182,7 @@ function renderToday() {
   </div>
   ${cur !== today() ? '<button class="link" data-act="dToday">← Till idag</button>' : ''}
   ${myTimer() ? (() => { const t = myTimer(), c = catById(t.categoryId) || { icon: '⏱️', name: 'Klocka' }; return `<div class="timer" id="timerCard"><div><i>${esc(c.icon)}</i><span><b>${esc(c.name)} pågår</b><small>start ${new Date(t.start).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })} · ${esc(t.project)}</small></span><em id="timerElapsed">${fmtElapsed(Date.now() - t.start)}</em></div><button class="stop" data-act="timerStop" id="stopBtn">■ Stoppa och spara</button></div>`; })() : ''}
+  ${!myTimer() && lastCatFor() ? (() => { const c = lastCatFor(), pj = lastProjectFor(cur); return `<button class="quickstart" data-act="timerQuick" id="quickStart">Starta ${esc(c.name)}<small>${esc(pj || '')}</small></button>`; })() : ''}
   ${rows.length || devs.length || atas.length || exs.length ? `<div class="daycard">
       ${rows.length ? `<div class="dtot"><b id="dayTotal">${h(tot)} h</b><span>${tot > lim ? `<span class="ot">varav ${h(tot - lim)} h övertid</span>` : 'sparat ✓'}</span></div>` : ''}
       <ul class="rows" id="dayList">${rows.map(r => `<li><button class="rowbtn" data-act="rowEdit" data-v="${r.id}"><i>${r.catIcon || '⏱️'}</i><span><b>${esc(r.catName)}</b><small>${esc(rowSub(r))}${r.imageIds?.length ? ` · 📷${r.imageIds.length}` : ''}</small></span><em>${h(r.hours)}</em></button></li>`).join('')}
@@ -190,18 +191,18 @@ function renderToday() {
       ${atas.map(x => `<li><button class="rowbtn" data-act="ataEdit" data-v="${x.id}"><i>➕</i><span><b>${ataNo(x)} · ${ataTypeLbl(x.type)} · ${statusLbl(x.status)}</b><small>${esc(x.desc)}</small></span><em>${x.hours ? h(x.hours) : ''}</em></button></li>`).join('')}</ul>
       ${undoIds ? '<button class="link" data-act="undo" id="undoBtn">↶ Ångra</button>' : ''}
     </div>` : ''}
-  ${!rows.length && prevRows.length ? `<button class="same" data-act="copyPrev" id="sameBtn"><b>${prev === ymd(addDays(cur, -1)) ? 'Samma som igår' : 'Samma som ' + fmtDate(prev)}</b><span>${h(dayTotal(prev))} h · ${esc([...new Set(prevRows.map(r => `${r.catIcon} ${r.catName}`))].join(' + '))} · ${esc([...new Set(prevRows.map(r => r.project))].join(', '))}</span></button>` : ''}
-  ${!myTimer() && lastCatFor() ? (() => { const c = lastCatFor(), pj = lastProjectFor(cur); return `<button class="quickstart" data-act="timerQuick" id="quickStart">▶ Starta ${esc(c.icon)} ${esc(c.name)}<small>${esc(pj || '')}</small></button>`; })() : ''}
-  <form class="quickin" id="quickForm" autocomplete="off"><input type="text" id="qIn" enterkeyhint="done" placeholder="🎤 Säg eller skriv: 8 h grävmaskin rototilt" aria-label="Säg eller skriv"><button type="submit" aria-label="Spara">OK</button></form>
-  <div class="sect">${rows.length ? 'Lägg till mer' : prevRows.length ? 'Eller välj' : 'Vad har du kört?'}</div>
-  <div class="cats" id="cats">${S().categories.map(c => `<button class="cat" data-act="cat" data-v="${c.id}"><i>${esc(c.icon)}</i>${esc(c.name)}</button>`).join('')}</div>
+  ${!rows.length && prevRows.length ? `<button class="same" data-act="copyPrev" id="sameBtn"><b>${prev === ymd(addDays(cur, -1)) ? 'Samma som igår' : 'Samma som ' + fmtDate(prev)}</b><span>${h(dayTotal(prev))} h · ${esc([...new Set(prevRows.map(r => r.catName))].join(' + '))} · ${esc([...new Set(prevRows.map(r => r.project))].join(', '))}</span></button>` : ''}
+  <div class="sect">${rows.length ? 'Lägg till maskin' : 'Välj maskin'}</div>
+  <div class="cats" id="cats">${S().categories.map(c => `<button class="cat" data-act="cat" data-v="${c.id}">${esc(c.name)}</button>`).join('')}</div>
   <div class="tools">
-    <button class="tool" data-act="newExtra" id="exBtn">＋<span>Tillägg</span></button>
-    <button class="tool" data-act="newDev" id="devBtn">⚠️<span>Avvikelse</span></button>
-    <button class="tool" data-act="newAta" id="ataBtn">➕<span>ÄTA</span></button>
+    <button class="tool" data-act="newExtra" id="exBtn">Tillägg</button>
+    <button class="tool" data-act="newAta" id="ataBtn">ÄTA</button>
+    <button class="tool" data-act="newDev" id="devBtn">Avvikelse</button>
   </div>
-  <div class="sect">Vecka ${w.week} · <b>${h(wtot)} h</b></div>
-  <ul class="week">${wdays.map(d => { const t = dayTotal(d); return `<li><button data-act="goDate" data-v="${d}" class="${d === cur ? 'on' : ''}"><span>${dayName(d).slice(0, 3)} ${parse(d).getDate()}/${parse(d).getMonth() + 1}</span><small>${esc([...new Set(dayRows(d).map(r => r.catIcon))].join(' '))}</small><b class="${t > lim ? 'ot' : ''}">${t ? h(t) : '–'}</b></button></li>`; }).join('')}</ul>`;
+  <details class="qmore" id="qMore"><summary>Skriv eller säg in tid</summary>
+  <form class="quickin" id="quickForm" autocomplete="off"><input type="text" id="qIn" enterkeyhint="done" placeholder="t.ex. 8 h grävmaskin rototilt" aria-label="Säg eller skriv"><button type="submit" aria-label="Spara">OK</button></form>
+  <p class="muted small">Tryck på mikrofonen i tangentbordet för att tala in.</p></details>
+  <button class="weekline" data-act="goWeek" id="weekLine">Vecka ${w.week}<b>${h(wtot)} h</b></button>`;
 }
 function goDate(d) { cur = d; undoIds = null; renderToday(); }
 function copyPrev() {
@@ -349,9 +350,9 @@ function artOrder() { const cnt = {}; db.extras.filter(x => x.kind === 'article'
 const artDefault = a => a.unit === 'h' ? (dayTotal(cur) || 8) : 1;
 function sheetExtra() {
   const items = dayExtras(cur);
-  const mb = (k, i, n) => `<button data-act="exMode" data-v="${k}" class="${ex.mode === k ? 'on' : ''}">${i} ${n}</button>`;
+  const mb = (k, i, n) => `<button data-act="exMode" data-v="${k}" class="${ex.mode === k ? 'on' : ''}">${n}</button>`;
   let body = '';
-  if (ex.mode === 'photo') body = `<div class="photobtns"><label>📷 Ta foto<input type="file" accept="image/*" capture="environment" data-photo="extra"></label><label>🖼️ Galleri<input type="file" accept="image/*" multiple data-photo="extra"></label></div><p class="muted small">Sparas direkt på ${esc(projSub(ex))}.</p>`;
+  if (ex.mode === 'photo') body = `<div class="photobtns"><label>Ta foto<input type="file" accept="image/*" capture="environment" data-photo="extra"></label><label>Galleri<input type="file" accept="image/*" multiple data-photo="extra"></label></div><p class="muted small">Sparas direkt på ${esc(projSub(ex))}.</p>`;
   if (ex.mode === 'article') {
     const arts = artOrder();
     body = `<div class="chips" id="artChips">${arts.map(a => `<button class="chip ${a.name in ex.arts ? 'sel' : ''}" data-act="exArt" data-v="${esc(a.name)}">${esc(a.name)}</button>`).join('')}<button class="chip more" data-act="exArtNew" id="artNew">+ Ny</button></div>
@@ -397,14 +398,14 @@ function renderWeek() {
   <div class="seg small"><button data-act="repMode" data-v="week" class="${repMode === 'week' ? 'on' : ''}">Vecka</button><button data-act="repMode" data-v="month" class="${repMode === 'month' ? 'on' : ''}">Månad</button></div>
   <div class="dhead"><button class="nb" data-act="repPrev" aria-label="Föregående">‹</button><div class="dl"><b id="repLabel">${r.label}</b><span>${r.sub}</span></div><button class="nb" data-act="repNext" aria-label="Nästa">›</button></div>
   <div class="bigtot"><b id="repTotal">${h(R.total)}</b><span>timmar</span>${R.ot ? `<em class="ot" id="repOt">varav ${h(R.ot)} h övertid</em>` : '<em id="repOt"></em>'}</div>
-  ${ppl.length > 1 ? `<select id="personSel" class="personsel" aria-label="Person"><option value="all">👥 Alla (${ppl.length})</option>${ppl.map(p => `<option value="${p.id}"${p.id === personFilter ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}
-  <ul class="week">${shownDates.map(d => { const t = dTot(d); return `<li><button data-act="openDay" data-v="${d}"><span>${dayName(d).slice(0, 3)} ${parse(d).getDate()}/${parse(d).getMonth() + 1}</span><small>${esc([...new Set(R.rows.filter(x => x.date === d).map(r => r.catIcon + ' ' + r.catName))].join(', '))}</small><b class="${(R.perDay.find(x => x.date === d) || {}).ot > 0 ? 'ot' : ''}">${t ? h(t) : '–'}</b></button></li>`; }).join('') || '<li class="empty">Inga timmar.</li>'}</ul>
-  <button class="primary" data-act="sendWeek" id="sendBtn">📧 Skicka ${repMode === 'week' ? 'veckorapport' : 'månadsrapport'}</button>
+  ${ppl.length > 1 ? `<select id="personSel" class="personsel" aria-label="Person"><option value="all">Alla (${ppl.length})</option>${ppl.map(p => `<option value="${p.id}"${p.id === personFilter ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>` : ''}
+  <ul class="week">${shownDates.map(d => { const t = dTot(d); return `<li><button data-act="openDay" data-v="${d}"><span>${dayName(d).slice(0, 3)} ${parse(d).getDate()}/${parse(d).getMonth() + 1}</span><small>${esc([...new Set(R.rows.filter(x => x.date === d).map(r => r.catName))].join(', '))}</small><b class="${(R.perDay.find(x => x.date === d) || {}).ot > 0 ? 'ot' : ''}">${t ? h(t) : '–'}</b></button></li>`; }).join('') || '<li class="empty">Inga timmar.</li>'}</ul>
+  <button class="primary" data-act="sendWeek" id="sendBtn">Skicka ${repMode === 'week' ? 'veckorapport' : 'månadsrapport'}</button>
   ${S().recipients ? `<p class="muted small center" id="recips">Till: ${esc(S().recipients)}</p>` : '<p class="muted small center">Tips: ange mottagare under ⚙ → E-post.</p>'}
-  <div class="grid2"><button class="secondary" data-act="pdfDownload" id="pdfBtn">⬇ Spara PDF</button><button class="secondary" data-act="print" id="printBtn">🖨 Skriv ut</button></div>
-  ${!owner ? '<button class="secondary" data-act="sendOwner" id="sendOwnerW">📤 Skicka mina poster till ägaren</button>' : ''}
+  <div class="grid2"><button class="secondary" data-act="pdfDownload" id="pdfBtn">Spara PDF</button><button class="secondary" data-act="print" id="printBtn">Skriv ut</button></div>
+  ${!owner ? '<button class="secondary" data-act="sendOwner" id="sendOwnerW">Skicka mina poster till ägaren</button>' : ''}
   ${R.devs.length || R.atas.length ? `<div class="sect">Avvikelser och ÄTA</div><ul class="rows">${R.devs.map(x => `<li><button class="rowbtn" data-act="devEdit" data-v="${x.id}"><i>⚠️</i><span><b>${fmtDate(x.date)} · ${x.status === 'open' ? 'Öppen' : 'Åtgärdad'}</b><small>${esc(x.desc)}</small></span></button></li>`).join('')}${R.atas.map(x => `<li><button class="rowbtn" data-act="ataEdit" data-v="${x.id}"><i>➕</i><span><b>${ataNo(x)} · ${ataTypeLbl(x.type)} · ${statusLbl(x.status)}</b><small>${esc(x.desc)}</small></span><em>${x.hours ? h(x.hours) : ''}</em></button></li>`).join('')}</ul>` : ''}
-  ${R.arts.length || R.photosEx.length ? `<div class="sect">Tillägg</div><ul class="week" id="weekExtras">${R.artSum.map(a => `<li><div class="wl"><span>🧰 ${esc(a.name)}</span><b>${h(a.qty)} ${esc(a.unit)}</b></div></li>`).join('')}${R.photosEx.length ? `<li><div class="wl"><span>📷 Foton</span><b>${R.photosEx.reduce((s, x) => s + x.imageIds.length, 0)}</b></div></li>` : ''}</ul>` : ''}
+  ${R.arts.length || R.photosEx.length ? `<div class="sect">Tillägg</div><ul class="week" id="weekExtras">${R.artSum.map(a => `<li><div class="wl"><span>${esc(a.name)}</span><b>${h(a.qty)} ${esc(a.unit)}</b></div></li>`).join('')}${R.photosEx.length ? `<li><div class="wl"><span>Foton</span><b>${R.photosEx.reduce((s, x) => s + x.imageIds.length, 0)}</b></div></li>` : ''}</ul>` : ''}
   ${R.cats.length ? `<details><summary>Detaljer per maskin och tillägg</summary>${catTable(R, R.amount > 0 || R.ataSum > 0)}${R.km ? `<p>Körda km: <b>${h(R.km)}</b></p>` : ''}${R.mats.length ? `<table><tbody>${R.mats.map(m => `<tr><td>${esc(m.name)}</td><td class="n">${h(m.qty)} ${esc(m.unit)}</td></tr>`).join('')}</tbody></table>` : ''}</details>` : ''}`;
 }
 function shareText(r, R) {
@@ -652,8 +653,8 @@ function renderSetup() {
   const box = (inner) => `<div class="setupbox"><div class="logo big">${esc(pendingInvite ? pendingInvite.n : (S().company || 'Tidrapport'))}</div>${inner}</div>`;
   let html;
   if (setupStage === 'choose') html = box(`<h1>Välkommen!</h1><p>Hur ska du använda appen?</p>
-    <button class="primary" data-act="suOwner" id="suOwner">🏢 Skapa företag (ägare)</button>
-    <button class="secondary big2" data-act="suMember" id="suMember">👷 Anslut till företag (anställd)</button>
+    <button class="primary" data-act="suOwner" id="suOwner">Skapa företag (ägare)</button>
+    <button class="secondary big2" data-act="suMember" id="suMember">Anslut till företag (anställd)</button>
     <p class="muted small">Allt sparas bara i den här telefonen. Ingen server, inget konto.</p>`);
   else if (setupStage === 'owner') html = box(`<h1>Nytt företag</h1>
     <label>Företagsnamn<input type="text" id="suCompany" value="${esc(S().company)}" placeholder="t.ex. Exempel Åkeri AB"></label>
@@ -666,8 +667,8 @@ function renderSetup() {
     <label>PIN (valfri, 4 siffror)<input type="password" inputmode="numeric" maxlength="4" id="suPin" placeholder="Hoppa över = inget lås" autocomplete="new-password"></label>
     <button class="primary" data-act="joinDone" id="joinBtn">Anslut</button><button class="ghost" data-act="suBack">← Tillbaka</button>`
     : `<h1>Anslut till företag</h1><p>Be ägaren visa QR-koden under ⚙ → Team.</p>
-    <button class="primary" data-act="scanQr" id="scanBtn">📷 Skanna QR-kod</button>
-    <label class="secondary filebtn big2">📂 Öppna inbjudningsfil<input type="file" id="inviteFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>
+    <button class="primary" data-act="scanQr" id="scanBtn">Skanna QR-kod</button>
+    <label class="secondary filebtn big2">Öppna inbjudningsfil<input type="file" id="inviteFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>
     <label>…eller klistra in länken/koden<input type="text" id="inviteCode" placeholder="https://…#join=…"></label>
     <button class="secondary" data-act="inviteFromText" id="inviteGo">Fortsätt</button><button class="ghost" data-act="suBack">← Tillbaka</button>`);
   $('#setup').innerHTML = html; $('#setup').classList.remove('hidden');
@@ -805,17 +806,17 @@ function sheetTeam() {
   if (owner) return `${head('👥', 'Team', esc(db.company ? `${db.company.name} · ${db.company.id}` : ''))}
     <p class="muted small">Anställda skannar koden med appen (⚙ → Anslut) eller telefonens kamera. Koden innehåller företags-ID, projekt, underprojekt, maskiner och artiklar – inga tider.</p>
     <div class="qrbox"><img id="qrImg" alt="QR-kod för inbjudan"></div>
-    <button class="primary" data-act="shareInvite" id="shareInvite">📤 Skicka inbjudan / uppdatering</button>
-    <button class="secondary" data-act="copyInvite">🔗 Kopiera länk</button>
-    <label class="secondary filebtn">📥 Läs in fil från anställd<input type="file" id="importFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>
+    <button class="primary" data-act="shareInvite" id="shareInvite">Skicka inbjudan / uppdatering</button>
+    <button class="secondary" data-act="copyInvite">Kopiera länk</button>
+    <label class="secondary filebtn">Läs in fil från anställd<input type="file" id="importFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>
     ${ppl.length ? `<div class="sect">Personer</div><ul class="rows">${ppl.map(p => `<li><div class="rowbtn"><i>👷</i><span><b>${esc(p.name)}</b><small>${db.rows.filter(r => r.by === p.id).length} rader${db.team[p.id] ? ` · senast inläst ${new Date(db.team[p.id].last).toLocaleString('sv-SE')}` : ''}</small></span></div></li>`).join('')}</ul>` : ''}`;
   return `${head('👥', 'Team', esc(`${db.company.name} · ${db.company.id}`))}
     <p class="muted small">Du är ansluten som anställd. Skicka dina poster till ägaren som fil (Gmail, sms, WhatsApp …).</p>
-    <button class="primary" data-act="sendOwner" id="sendOwner">📤 Skicka till ägaren</button>
+    <button class="primary" data-act="sendOwner" id="sendOwner">Skicka till ägaren</button>
     <button class="ghost" data-act="sendOwnerAll">Skicka allt igen (även gamla bilder)</button>
     <div class="sect">Uppdatering från ägaren</div>
-    <button class="secondary" data-act="scanQr">📷 Skanna ny QR-kod</button>
-    <label class="secondary filebtn">📥 Läs in fil från ägaren<input type="file" id="importFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>`;
+    <button class="secondary" data-act="scanQr">Skanna ny QR-kod</button>
+    <label class="secondary filebtn">Läs in fil från ägaren<input type="file" id="importFile" accept=".txt,.json,.tidrapport,text/plain,application/json"></label>`;
 }
 async function fillQr() {
   const img = $('#qrImg'); if (!img || !db.company) return;
@@ -925,13 +926,14 @@ function teamCards() {
   return `<div class="card" id="profileCard"><h2>Profil och lås</h2>
     <p>Inloggad som <b>${esc(me.name || '–')}</b>${db.profiles.length > 1 ? ` · ${db.profiles.length} personer på telefonen` : ''}</p>
     ${me.pinHash ? `<label style="display:flex;align-items:center;gap:10px;min-height:56px"><input type="checkbox" id="lockOn" ${S().lock ? 'checked' : ''} style="width:28px;height:28px"> Lås appen med PIN</label>
-      <div class="grid2"><button class="secondary" data-act="pinSet">Byt PIN</button><button class="secondary" data-act="pinRemove">Ta bort PIN</button></div>` : '<button class="secondary" data-act="pinSet" id="pinSetBtn">🔒 Sätt PIN (4 siffror)</button>'}
+      <div class="grid2"><button class="secondary" data-act="pinSet">Byt PIN</button><button class="secondary" data-act="pinRemove">Ta bort PIN</button></div>` : '<button class="secondary" data-act="pinSet" id="pinSetBtn">Sätt PIN (4 siffror)</button>'}
     <div class="grid2"><button class="secondary" data-act="addPerson">+ Person</button>${db.profiles.length > 1 ? '<button class="secondary" data-act="switchPerson">Byt person</button>' : '<span></span>'}</div>
     <label style="display:flex;align-items:center;gap:10px;min-height:56px"><input type="checkbox" data-s="gps" id="gpsOn" ${st.gps ? 'checked' : ''} style="width:28px;height:28px"> Visa GPS-knapp för plats (av som standard)</label>
+    <label style="display:flex;align-items:center;gap:10px;min-height:56px"><input type="checkbox" id="themeLight" ${S().theme === 'light' ? 'checked' : ''} style="width:28px;height:28px"> Ljust tema (av = mörkt)</label>
     <p class="muted small">PIN-låset är ett enkelt lås mot nyfikna, ingen riktig säkerhet. PIN sparas aldrig i klartext (SHA-256 + salt), men datan i telefonen är inte krypterad.</p></div>
   <div class="card" id="teamCard"><h2>Företag och team</h2>
     <p>${c ? `<b>${esc(c.name)}</b> · ID ${esc(c.id)} · ${owner ? 'du är ägare' : `anställd${c.owner ? ` (ägare ${esc(c.owner)})` : ''}`}` : 'Inget företag'}</p>
-    <button class="primary" data-act="openTeam" id="teamBtn">👥 ${owner ? 'Bjud in / läs in från anställda' : 'Skicka till ägaren / uppdatera'}</button></div>
+    <button class="primary" data-act="openTeam" id="teamBtn">${owner ? 'Bjud in / läs in från anställda' : 'Skicka till ägaren / uppdatera'}</button></div>
   <div class="card" id="mailCard"><h2>E-post</h2>
     <label>Standardmottagare för veckorapporten<input type="text" data-s="recipients" id="recipIn" inputmode="email" value="${esc(st.recipients || '')}" placeholder="namn@exempel.se, annan@exempel.se"></label>
     <p class="muted small">”Skicka veckorapport” skapar en PDF och öppnar delningsmenyn (välj Gmail). Mottagarna kopieras så att du kan klistra in dem. Spara med knappen längst ner.</p></div>`;
@@ -950,7 +952,8 @@ function show(v) {
 }
 $$('#tabs button').forEach(b => b.onclick = () => { closeSheet(); show(b.dataset.v); });
 $('#profBtn').onclick = () => { closeSheet(); if (lockActive() && ME().pinHash) showLock(); else show('set'); };
-function renderHeader() { $('#logo').textContent = S().company || 'Tidrapport'; $('#topSub').textContent = ME().name || S().name || ''; const b = $('#profBtn'); b.textContent = ME().pinHash && S().lock ? '🔒' : '👤'; b.title = ME().pinHash && S().lock ? 'Lås nu' : 'Profil'; }
+function applyTheme() { const l = S().theme === 'light'; document.documentElement.dataset.theme = l ? 'light' : 'dark'; const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = l ? '#F5F3F3' : '#121417'; }
+function renderHeader() { applyTheme(); $('#logo').textContent = S().company || 'Tidrapport'; $('#topSub').textContent = ME().name || S().name || ''; const b = $('#profBtn'); b.textContent = ME().pinHash && S().lock ? '🔒' : '👤'; b.title = ME().pinHash && S().lock ? 'Lås nu' : 'Profil'; }
 const byId = (arr, el) => arr.find(x => x.id === el.dataset.v);
 const ACT = {
   dPrev: () => goDate(ymd(addDays(cur, -1))), dNext: () => goDate(ymd(addDays(cur, 1))), dToday: () => goDate(today()),
@@ -1012,6 +1015,7 @@ const ACT = {
   openTeam: () => openSheet('team'), shareInvite, copyInvite: async () => { if (!inviteCode) inviteCode = await packJson(invitePayload()); try { await navigator.clipboard.writeText(inviteUrl(inviteCode)); toast('Länken kopierad'); } catch (e) { prompt('Kopiera länken:', inviteUrl(inviteCode)); } },
   sendOwner: () => exportMine(false), sendOwnerAll: () => exportMine(true),
   timerQuick: () => { const c = lastCatFor(); if (!c) return; const pj = lastProjectFor(cur) || S().defaultProject, lr = [...db.rows].filter(r => mine(r) && r.categoryId === c.id).sort((x, y) => (y.created || 0) - (x.created || 0))[0], ad = {}; ((lr && lr.addons) || []).forEach(x => ad[x.id] = x.unit ? x.qty : ''); rd = { categoryId: c.id, project: pj, sub: lastSubFor(pj) || '', addons: ad }; startTimer(); },
+  goWeek: () => show('week'),
   timerStart: startTimer, timerStop: () => stopTimer(false),
   sendWeek, pdfDownload: async () => { toast('Skapar PDF…'); const { file } = await weekPdfFile(); download(file.name, file, 'application/pdf'); toast('PDF sparad ✓'); },
   projAdd: () => { const v = $('#newProj').value.trim(); if (v && !st.projects.includes(v)) st.projects.push(v); renderSet(); },
@@ -1035,7 +1039,8 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const t = e.target, val = t.type === 'checkbox' ? t.checked : t.value;
   switch (t.id) {
-    case 'lockOn': S().lock = !!val; save(); renderHeader(); return;
+    case 'lockOn': S().lock = !!val; if (st) st.lock = !!val; save(); renderHeader(); return;
+    case 'themeLight': S().theme = val ? 'light' : 'dark'; if (st) st.theme = S().theme; save(); applyTheme(); return;
     case 'personSel': personFilter = val; renderWeek(); return;
     case 'fProject': rd.project = val; return; case 'fSub': rd.sub = val; return; case 'fMh': rd.mh = val; return;
     case 'exProject': if (ex.project !== val) { ex.project = val; ex.sub = lastSubFor(val); renderSheet(); } return; case 'exSub': ex.sub = val; return; case 'exArtNote': ex.artNote = val; return; case 'fWo': rd.wo = val; return; case 'fNote': rd.note = val; return;
