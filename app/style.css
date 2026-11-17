@@ -399,3 +399,11 @@ main{padding-right:calc(var(--side) + env(safe-area-inset-right,0px))}
 #sheetBody{padding-right:calc(14px + var(--side) + env(safe-area-inset-right,0px))}
 #scan{padding-right:calc(var(--side) + env(safe-area-inset-right,0px))}
 @media print{.sidebrand{display:none!important}}
+/* ===== v4.4.1 – stora, läsbara tillägg/redskap under vald maskin ===== */
+.addon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0 0;width:100%}
+.addon-grid .addonbtn{display:flex;align-items:center;justify-content:center;width:100%;min-height:64px;margin:0;padding:8px 6px;box-sizing:border-box;background:var(--card2);border:2px solid #7A7A7A;border-radius:14px;color:var(--fg);font-size:17px!important;font-weight:700;line-height:1.25;text-align:center}
+.addon-grid .addonbtn span{display:block;max-width:100%;text-align:center;white-space:normal;overflow-wrap:normal;word-break:normal}
+.addon-grid .addonbtn.sel{background:var(--acc);border-color:var(--acct);color:#fff}
+.addon-grid .addonbtn:active{background:var(--card)}
+:root[data-theme=light] .addon-grid .addonbtn{border-color:#8A7074;background:var(--card2)}
+:root[data-theme=light] .addon-grid .addonbtn.sel{background:var(--acc);border-color:var(--acc);color:#fff}
