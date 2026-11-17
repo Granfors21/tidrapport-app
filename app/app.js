@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.3.2';
+const VERSION = '4.4.0';
 const BRAND = 'Granfors Åkeri AB';
 const brand = () => (db && db.settings && db.settings.company) || BRAND;
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
@@ -625,7 +625,6 @@ function renderLock(msg = '') {
   const withPin = db.profiles.filter(p => p.pinHash);
   const title = { unlock: `Hej ${esc(pinProfile.name || '')}!`, set1: 'Välj en PIN (4 siffror)', set2: 'Skriv PIN igen' }[pinMode];
   $('#lock').innerHTML = `<div class="lockbox">
-    <div class="logo big">${esc(brand())}</div>
     <h2 id="lockTitle">${title}</h2>
     ${pinMode === 'unlock' && withPin.length > 1 ? `<div class="chips center-chips">${withPin.map(p => `<button class="chip ${p.id === pinProfile.id ? 'sel' : ''}" data-act="pinWho" data-v="${p.id}">${esc(p.name)}</button>`).join('')}</div>` : ''}
     <div class="dots" id="pinDots">${[0, 1, 2, 3].map(i => `<i class="${i < pinBuf.length ? 'on' : ''}"></i>`).join('')}</div>
@@ -652,7 +651,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) hidde
 /* ---- Första start ---- */
 let setupStage = 'choose', pendingInvite = null;
 function renderSetup() {
-  const box = (inner) => `<div class="setupbox"><div class="logo big">${esc(pendingInvite ? (pendingInvite.n || BRAND) : brand())}</div>${inner}</div>`;
+  const box = (inner) => `<div class="setupbox">${inner}</div>`;
   let html;
   if (setupStage === 'choose') html = box(`<h1>Välkommen!</h1><p>Hur ska du använda appen?</p>
     <button class="primary" data-act="suOwner" id="suOwner">Skapa företag (ägare)</button>
@@ -1029,8 +1028,8 @@ function show(v) {
 }
 $$('#tabs button').forEach(b => b.onclick = () => { closeSheet(); show(b.dataset.v); });
 $('#profBtn').onclick = () => { closeSheet(); if (lockActive() && ME().pinHash) showLock(); else show('set'); };
-function applyTheme() { const l = S().theme === 'light'; document.documentElement.dataset.theme = l ? 'light' : 'dark'; const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = l ? '#F5F3F3' : '#121417'; }
-function renderHeader() { applyTheme(); $('#logo').textContent = brand(); $('#topSub').textContent = ME().name || S().name || ''; const b = $('#profBtn'); b.textContent = ME().pinHash && S().lock ? '🔒' : '👤'; b.title = ME().pinHash && S().lock ? 'Lås nu' : 'Profil'; }
+function applyTheme() { const l = S().theme === 'light'; document.documentElement.dataset.theme = l ? 'light' : 'dark'; const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = l ? '#F5F3F3' : '#1C1C1C'; }
+function renderHeader() { applyTheme(); const sb = $('#sideBrandText'); if (sb) sb.textContent = brand(); $('#topSub').textContent = ME().name || S().name || ''; const b = $('#profBtn'); b.textContent = ME().pinHash && S().lock ? '🔒' : '👤'; b.title = ME().pinHash && S().lock ? 'Lås nu' : 'Profil'; }
 const byId = (arr, el) => arr.find(x => x.id === el.dataset.v);
 const ACT = {
   dPrev: () => goDate(ymd(addDays(cur, -1))), dNext: () => goDate(ymd(addDays(cur, 1))), dToday: () => goDate(today()),
