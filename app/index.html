@@ -14,7 +14,7 @@
 </head>
 <body>
 <div id="app">
-  <header class="top"><div class="logo" id="logo">Tidrapport</div><div class="sub" id="topSub"></div></header>
+  <header class="top"><div class="logo" id="logo">Tidrapport</div><div class="sub" id="topSub"></div><button class="prof" id="profBtn" aria-label="Konto (valfritt)">👤</button></header>
   <main>
     <section id="view-today" class="view active"></section>
     <section id="view-week" class="view"></section>
@@ -33,7 +33,11 @@
   <img id="lbImg" alt="">
   <div class="lbbar"><button id="lbDel" class="danger">Radera bild</button><button id="lbClose" class="primary">Stäng</button></div>
 </div>
+<div id="lock" class="hidden" role="dialog" aria-label="Lås"></div>
+<div id="scan" class="hidden" role="dialog" aria-label="Skanna QR"><video id="scanVideo" playsinline muted></video><p>Rikta kameran mot QR-koden</p><button class="primary" data-act="scanClose">Avbryt</button></div>
 <div id="print"></div>
+<script src="lib/qrcode.js"></script>
+<script src="pdf.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

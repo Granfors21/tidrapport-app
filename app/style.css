@@ -107,7 +107,7 @@ summary::before{content:"▸";margin-right:10px;transition:.2s}details[open] sum
 .setupbox{width:100%;max-width:460px}.setupbox p{color:var(--muted);margin:0 0 8px}
 /* vecka */
 .seg{display:flex;background:var(--in);border-radius:14px;padding:4px;gap:4px;border:2px solid var(--line)}
-.seg button{flex:1;min-width:0;min-height:52px;padding:0 4px;background:transparent;font-weight:700;font-size:16px}.seg button.on{background:var(--acc);color:#fff}
+.seg button{flex:1;min-width:0;min-height:56px;padding:0 4px;background:transparent;font-weight:700;font-size:16px}.seg button.on{background:var(--acc);color:#fff}
 .seg.small{max-width:260px;margin:0 auto}
 .bigtot{text-align:center;margin:4px 0 12px}.bigtot b{display:block;font-size:64px;line-height:1;color:var(--acct);font-weight:800}.bigtot span{font-weight:700;color:var(--muted)}.bigtot em{display:block;font-style:normal;margin-top:4px}
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:15px}
@@ -137,7 +137,7 @@ tr.tot td{font-weight:800;border-bottom:0;border-top:2px solid var(--fg)}
 .filebtn input{position:absolute;inset:0;opacity:0}
 @media print{
   @page{size:A4;margin:14mm}
-  #app,#lightbox,#sheet,#setup{display:none!important}
+  #app,#lightbox,#sheet,#setup,#lock,#scan{display:none!important}
   #print{display:block!important;color:#000;background:#fff;font:10pt/1.35 system-ui,"Segoe UI",Roboto,sans-serif}
   html,body{background:#fff}
   .rep h2,.rep h3{break-after:avoid}
@@ -162,3 +162,32 @@ tr.tot td{font-weight:800;border-bottom:0;border-top:2px solid var(--fg)}
 .rep-foot div{flex:1;border-top:1px solid #000;padding-top:4px}
 .rep-small{font-size:8pt;color:#777;margin-top:12px}
 .dtot .ot{color:var(--warn)}
+.week .wl{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:56px;padding:0 14px;font-weight:600}.week .wl b{font-size:19px;white-space:nowrap}.exbody{margin-top:10px}
+.statusbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;min-height:56px;font-size:18px;border:2px solid var(--line);background:var(--in)}
+.statusbtn span{font-size:22px}.statusbtn.st-begard{background:#f6d7a7;color:#5a3300;border-color:#e3b66d}.statusbtn.st-godkand{background:#c9ecd6;color:#0f4a26;border-color:#8fd0a8}.statusbtn.st-fakturerad{background:#e2d6f3;color:#3f2370;border-color:#bca5e0}
+.top{align-items:center}.prof{min-height:56px;min-width:56px;padding:0;background:rgba(255,255,255,.15);color:#fff;font-size:20px;border-radius:12px}
+.notice{background:var(--chip);border-left:4px solid var(--acc);padding:10px 12px;border-radius:10px;font-weight:600}
+input[type=email],input[type=password]{display:block;width:100%;font:inherit;font-size:19px;color:var(--fg);background:var(--in);border:2px solid var(--line);border-radius:14px;padding:12px;min-height:56px}
+button:disabled{opacity:.45;cursor:not-allowed}
+/* v4: lås, team, klocka, snabbtolk */
+#lock{position:fixed;inset:0;z-index:35;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto}
+.lockbox{width:100%;max-width:380px;text-align:center}.lockbox h2{font-size:24px;margin:8px 0}
+.dots{display:flex;justify-content:center;gap:18px;margin:14px 0 6px}.dots i{width:22px;height:22px;border-radius:50%;border:3px solid var(--acct)}.dots i.on{background:var(--acct)}
+.dots.shake{animation:shake .3s}@keyframes shake{25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}
+.pinmsg{min-height:24px;color:var(--bad);font-weight:700;margin:4px 0}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:8px 0 14px}.pad button{min-height:76px;font-size:32px;font-weight:700;background:var(--card);border:2px solid var(--line);border-radius:18px}
+.pad .small-t{font-size:16px}
+.center-chips{justify-content:center}
+#scan{position:fixed;inset:0;z-index:36;background:#000;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;gap:12px}
+#scan video{width:100%;max-width:480px;border-radius:16px}
+.qrbox{display:flex;justify-content:center;margin:10px 0}.qrbox img{width:100%;max-width:320px;image-rendering:pixelated;border-radius:12px;border:2px solid var(--line);background:#fff}
+.big2{min-height:64px;font-size:19px}
+.timer{background:var(--card);border:3px solid var(--acc);border-radius:18px;padding:12px;margin-bottom:10px}
+.timer>div{display:flex;align-items:center;gap:10px}.timer i{font-style:normal;font-size:34px}.timer span{flex:1}.timer b{display:block;font-size:19px}.timer small{color:var(--muted)}
+.timer em{font-style:normal;font-size:38px;font-weight:800;color:var(--acct);font-variant-numeric:tabular-nums}
+.stop{display:block;width:100%;margin-top:10px;min-height:68px;font-size:22px;font-weight:800;background:var(--bad);color:#fff}
+.startbtn{display:block;width:100%;margin-top:10px;min-height:60px;font-size:19px;font-weight:800;background:transparent;border:2px solid var(--acc);color:var(--acct)}
+.quickin{display:flex;gap:8px;margin-top:12px}.quickin input{flex:1;min-width:0;font-size:17px}.quickin button{min-width:64px;background:var(--acc);color:#fff;font-weight:800}
+.personsel{margin:0 0 10px;font-weight:700}
+.quickstart{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;min-height:76px;margin:10px 0 0;font-size:22px;font-weight:800;background:var(--acc);color:#fff;border-radius:18px}
+.quickstart small{font-size:14px;font-weight:600;opacity:.9}
