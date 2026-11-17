@@ -19,12 +19,14 @@
   <main>
     <section id="view-today" class="view active"></section>
     <section id="view-week" class="view"></section>
+    <section id="view-inv" class="view"></section>
     <section id="view-set" class="view"></section>
   </main>
   <nav class="tabs" id="tabs">
     <button data-v="today" class="on"><span>●</span>Idag</button>
     <button data-v="week"><span>▦</span>Vecka</button>
-    <button data-v="set"><span>⚙</span>Inställningar</button>
+    <button data-v="inv"><span>▣</span>Faktura</button>
+    <button data-v="set"><span>⚙</span>Inställ.</button>
   </nav>
   <div id="toast" role="status" aria-live="polite"></div>
 </div>
@@ -39,6 +41,8 @@
 <div id="print"></div>
 <script src="lib/qrcode.js"></script>
 <script src="pdf.js"></script>
+<script src="fonts-data.js"></script>
+<script src="invoice.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
