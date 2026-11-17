@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.4.2';
+const VERSION = '4.5.0';
 const BRAND = 'Granfors Åkeri AB';
 const brand = () => (db && db.settings && db.settings.company) || BRAND;
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
@@ -7,7 +7,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
 const clone = o => JSON.parse(JSON.stringify(o));
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;' }[c]));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;amp;', '<': '&amp;lt;', '>': '&amp;gt;', '"': '&#34;', "'": '&#39;' }[c]));
 const num = v => { const n = Number(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
 
 /* ================= Datum ================= */
@@ -53,7 +53,7 @@ function defaultSettings() {
 }
 
 /* ================= Lagring ================= */
-function emptyDb() { return { v: 2, settings: defaultSettings(), rows: [], days: {}, devs: [], atas: [], extras: [] }; }
+function emptyDb() { return { v: 2, settings: defaultSettings(), rows: [], days: {}, devs: [], atas: [], extras: [], invoices: [] }; }
 function migrateV1(d) {
   const db = emptyDb();
   Object.assign(db.settings, { company: d.settings.company ?? db.settings.company, name: d.settings.name || '', rate: d.settings.rate || '', otLimit: d.settings.otLimit || 8, projects: d.settings.projects?.length ? d.settings.projects : ['Allmänt'], defaultProject: d.settings.defaultProject || 'Allmänt' });
@@ -82,6 +82,8 @@ function normalize(d) {
   db.atas.forEach(x => { if (x.status === 'beordrad' || x.status === 'utford') x.status = 'begard'; if (!x.type) x.type = 'tillagg'; }); db.days = db.days || {};
   Object.entries(db.days).forEach(([d, v]) => { if (v.imageIds && v.imageIds.length) { db.extras.push({ id: uid(), date: d, kind: 'photo', project: (db.rows.find(r => r.date === d) || {}).project || db.settings.defaultProject, sub: '', imageIds: v.imageIds, note: '', created: Date.now() }); v.imageIds = []; } });
   ensureTraktorgravare(db.settings);
+  if (typeof ensureInvoiceSettings === 'function') ensureInvoiceSettings(db.settings);
+  if (!Array.isArray(db.invoices)) db.invoices = [];
   return ensureTeam(db);
 }
 function load() {
@@ -525,6 +527,31 @@ function renderSet() {
     <div class="grid2"><label>Timpris (kr)<input type="number" inputmode="decimal" data-s="rate" value="${esc(st.rate)}" placeholder="valfritt"></label><label>Övertid över (h/dag)<input type="number" inputmode="decimal" step="0.5" data-s="otLimit" value="${esc(st.otLimit)}"></label></div>
     <label>Standardrast (min)<input type="number" inputmode="numeric" data-s="defBreak" value="${esc(st.defBreak)}"></label>
   </div>
+  <div class="card"><h2>Fakturauppgifter</h2>
+    <p class="muted small">Uppgifter som visas på fakturan. Lämna tomt tills du fyller i riktiga värden – appen hittar inte på org.nr eller bankgiro.</p>
+    <label>Adress<input type="text" data-inv="addr" value="${esc((st.invoice||{}).addr || '')}" placeholder="Gata och nummer"></label>
+    <div class="grid2"><label>Postnr<input type="text" data-inv="zip" value="${esc((st.invoice||{}).zip || '')}" placeholder="123 45"></label><label>Ort<input type="text" data-inv="city" value="${esc((st.invoice||{}).city || '')}"></label></div>
+    <div class="grid2"><label>Telefon<input type="tel" data-inv="phone" value="${esc((st.invoice||{}).phone || '')}"></label><label>E-post<input type="email" data-inv="email" value="${esc((st.invoice||{}).email || '')}"></label></div>
+    <div class="grid2"><label>Organisationsnummer<input type="text" data-inv="orgNr" id="invOrgNr" value="${esc((st.invoice||{}).orgNr || '')}" placeholder="t.ex. 556000-0000" autocomplete="off"></label><label>Momsreg.nr<input type="text" data-inv="vatNr" id="invVatNr" value="${esc((st.invoice||{}).vatNr || '')}" placeholder="SE… (ifylls från org.nr)"></label></div>
+    <label style="display:flex;align-items:center;gap:10px;min-height:56px"><input type="checkbox" data-inv="fskatt" ${(st.invoice||{}).fskatt !== false ? 'checked' : ''} style="width:28px;height:28px"> Godkänd för F-skatt</label>
+    <div class="grid2"><label>Bankgiro<input type="text" data-inv="bankgiro" value="${esc((st.invoice||{}).bankgiro || '')}" placeholder="XXX-XXXX" autocomplete="off"></label><label>Plusgiro<input type="text" data-inv="plusgiro" value="${esc((st.invoice||{}).plusgiro || '')}" autocomplete="off"></label></div>
+    <label>IBAN<input type="text" data-inv="iban" value="${esc((st.invoice||{}).iban || '')}" autocomplete="off"></label>
+    <label>Bank<input type="text" data-inv="bank" value="${esc((st.invoice||{}).bank || '')}"></label>
+    <div class="grid2"><label>Betalningsvillkor (dagar)<input type="number" inputmode="numeric" data-inv="dueDays" value="${esc((st.invoice||{}).dueDays || 30)}"></label><label>Nästa fakturanr (löpnummer)<input type="number" inputmode="numeric" data-inv="seq" value="${esc((st.invoice||{}).seq || 1)}"></label></div>
+    <label>Vår referens (standard)<input type="text" data-inv="ourRef" value="${esc((st.invoice||{}).ourRef || '')}" placeholder="Ditt namn"></label>
+  </div>
+  <div class="card"><h2>Kunder</h2>
+    <p class="muted small">Kunduppgifter sparas i telefonen och väljs när du skapar en faktura.</p>
+    ${(st.customers||[]).map((c,i) => `<div class="catedit custed">
+      <label>Kundnamn / företag<input type="text" data-cu="${i}.name" value="${esc(c.name||'')}"></label>
+      <label>Adress<input type="text" data-cu="${i}.addr" value="${esc(c.addr||'')}"></label>
+      <div class="grid2"><label>Postnr<input type="text" data-cu="${i}.zip" value="${esc(c.zip||'')}"></label><label>Ort<input type="text" data-cu="${i}.city" value="${esc(c.city||'')}"></label></div>
+      <div class="grid2"><label>Org.nr<input type="text" data-cu="${i}.orgNr" value="${esc(c.orgNr||'')}"></label><label>Referens<input type="text" data-cu="${i}.ref" value="${esc(c.ref||'')}"></label></div>
+      <label>E-post<input type="email" data-cu="${i}.email" value="${esc(c.email||'')}"></label>
+      <button class="ghost" data-act="custDel" data-v="${i}">Ta bort kund</button>
+    </div>`).join('') || '<p class="muted">Inga kunder ännu.</p>'}
+    <button class="secondary" data-act="custAdd">+ Ny kund</button>
+  </div>
   <div class="card"><h2>Projekt</h2>
     <ul class="list">${st.projects.map((p, i) => `<li><div class="info"><b>${esc(p)}</b></div><div class="act"><button data-act="projDel" data-v="${i}" aria-label="Ta bort">✕</button></div></li>`).join('')}</ul>
     <div class="row"><input type="text" id="newProj" placeholder="Nytt projekt / arbetsorder"><button class="secondary" data-act="projAdd" style="flex:0 0 auto;width:auto">Lägg till</button></div>
@@ -542,7 +569,7 @@ function renderSet() {
     <button class="secondary" data-act="catAdd">+ Ny resurs/kategori</button>
   </div>
   <div class="card"><h2>Artiklar (Tillägg)</h2><p class="muted small">Snabbval under ＋ Tillägg → Artiklar.</p>
-    ${st.articles.map((m, i) => `<div class="addrow" style="grid-template-columns:1fr 96px 46px"><input type="text" data-ar="${i}.name" value="${esc(m.name)}" aria-label="Artikel"><select data-ar="${i}.unit">${['st', 'h', 'dagar', 'm', 'ton'].map(u => `<option${u === m.unit ? ' selected' : ''}>${u}</option>`).join('')}</select><button data-act="artDefDel" data-v="${i}" aria-label="Ta bort">✕</button></div>`).join('')}
+    ${st.articles.map((m, i) => `<div class="addrow" style="grid-template-columns:1fr 80px 86px 46px"><input type="text" data-ar="${i}.name" value="${esc(m.name)}" aria-label="Artikel"><select data-ar="${i}.unit">${['st', 'h', 'dagar', 'm', 'ton'].map(u => `<option${u === m.unit ? ' selected' : ''}>${u}</option>`).join('')}</select><input type="number" inputmode="decimal" data-ar="${i}.price" value="${esc(m.price || '')}" placeholder="kr" aria-label="Pris"><button data-act="artDefDel" data-v="${i}" aria-label="Ta bort">✕</button></div>`).join('')}
     <button class="secondary" data-act="artDefAdd">+ Artikel</button>
   </div>
   <div class="card"><h2>Material</h2>
@@ -563,6 +590,9 @@ function saveSettings() {
   st.otLimit = num(st.otLimit) || 8; st.defBreak = num(st.defBreak);
   st.categories = st.categories.filter(c => c.name.trim()); st.categories.forEach(c => c.addons = c.addons.filter(x => x.name.trim()));
   st.materials = st.materials.filter(m => m.name.trim()); st.articles = st.articles.filter(m => m.name.trim());
+  if (typeof ensureInvoiceSettings === 'function') ensureInvoiceSettings(st);
+  st.invoice.dueDays = num(st.invoice.dueDays) || 30; st.invoice.seq = Math.max(1, num(st.invoice.seq) || 1);
+  st.customers = (st.customers || []).filter(c => (c.name || '').trim());
   if (!st.projects.length) st.projects = ['Allmänt'];
   if (!st.projects.includes(st.defaultProject)) st.defaultProject = st.projects[0];
   db.settings = st; fm = null; const pr = db.profiles.find(x => x.id === ME().id); if (pr && st.name && pr.name !== st.name) { pr.name = st.name; ['rows', 'devs', 'atas', 'extras'].forEach(k => db[k].forEach(x => { if (x.by === pr.id) x.byName = st.name; })); } if (db.company && db.company.role === 'owner') db.company.name = st.company || ''; save(); st = null; renderHeader(); renderSet(); toast('Inställningar sparade ✓');
@@ -1031,14 +1061,176 @@ function convertTimers() {
     db.rows.push({ id: uid(), created: Date.now(), date: t.date || ymd(st0), project: t.project || S().defaultProject, sub: t.sub || '', wo: '', categoryId: cat ? cat.id : '', catName: cat ? cat.name : 'Arbetstid', catIcon: cat ? cat.icon : '', hours: hrs, addons: [], km: null, materials: [], note: '', imageIds: [], time: { from: hhmm(st0), to: hhmm(en), brk: 0 }, by: pid, byName: p.name || '' }); saved++; } });
   db.timers = {}; save(); if (saved) setTimeout(() => toast('Pågående klocka sparad som tid – kontrollera raden'), 600);
 }
+
+/* ================= Faktura ================= */
+let invForm = null, invPrevUrl = null;
+function defaultInvForm() {
+  const w = isoWeek(parse(cur) || new Date());
+  const mon = mondayOf(w.year, w.week);
+  const dueDays = num((S().invoice || {}).dueDays) || 30;
+  const custs = S().customers || [];
+  return {
+    mode: 'weeks', weeks: [`${w.year}-${w.week}`],
+    from: ymd(mon), to: ymd(addDays(mon, 6)),
+    projects: [], customerId: (custs[0] || {}).id || '',
+    date: today(), due: ymd(addDays(today(), dueDays)),
+    ourRef: (S().invoice || {}).ourRef || S().name || (ME().name || ''),
+    theirRef: (custs.find(c => c.id === (custs[0] || {}).id) || {}).ref || '',
+    note: '', preview: null
+  };
+}
+function weeksAvail(n = 12) {
+  const has = new Set();
+  [...db.rows, ...db.extras, ...db.atas].forEach(x => { if (x.date) { const w = isoWeek(parse(x.date)); has.add(`${w.year}-${w.week}`); } });
+  const out = []; let d = parse(cur) || new Date();
+  for (let i = 0; i < n; i++) {
+    const w = isoWeek(d), key = `${w.year}-${w.week}`, mon = mondayOf(w.year, w.week);
+    out.push({ key, year: w.year, week: w.week, has: has.has(key), from: ymd(mon), to: ymd(addDays(mon, 6)) });
+    d = addDays(ymd(d), -7);
+  }
+  return out;
+}
+function invRange() {
+  if (!invForm) invForm = defaultInvForm();
+  if (invForm.mode === 'range') return { from: invForm.from, to: invForm.to, weeks: null };
+  const weeks = invForm.weeks || [];
+  if (!weeks.length) { const f = defaultInvForm(); return { from: f.from, to: f.to, weeks: f.weeks }; }
+  const days = [];
+  weeks.forEach(k => { const [y, w] = k.split('-').map(Number); const m = mondayOf(y, w); days.push(ymd(m), ymd(addDays(m, 6))); });
+  days.sort();
+  return { from: days[0], to: days[days.length - 1], weeks };
+}
+function invCustomer() { return (S().customers || []).find(c => c.id === invForm.customerId) || null; }
+function invDraft() {
+  const r = invRange(), c = invCustomer();
+  const no = nextInvoiceNo(S(), invForm.date).text;
+  return compileInvoice({
+    from: r.from, to: r.to, weeks: invForm.mode === 'weeks' ? r.weeks : null,
+    projects: invForm.projects, customer: c, date: invForm.date, due: invForm.due,
+    ourRef: invForm.ourRef, theirRef: invForm.theirRef || (c && c.ref) || '', note: invForm.note, no
+  });
+}
+function invMissingSetup(inv) {
+  const s = inv.seller, miss = [];
+  if (!s.orgNr) miss.push('organisationsnummer');
+  if (!s.bankgiro && !s.plusgiro && !s.iban) miss.push('bankgiro, plusgiro eller IBAN');
+  if (!s.addr && !s.city) miss.push('företagsadress');
+  if (!inv.buyer || !inv.buyer.name) miss.push('kund');
+  return miss;
+}
+async function invMakePdf(inv) {
+  toast('Skapar faktura…');
+  const blob = await buildInvoicePdf(inv);
+  const who = slug((inv.buyer && inv.buyer.name) || 'kund');
+  return new File([blob], `Faktura-${inv.no}-${who}.pdf`, { type: 'application/pdf' });
+}
+function invCommit(inv) {
+  const n = nextInvoiceNo(S(), inv.date);
+  S().invoice.seq = n.seq + 1;
+  db.invoices = db.invoices || [];
+  db.invoices.unshift({ id: uid(), no: inv.no, date: inv.date, due: inv.due, customer: (inv.buyer && inv.buyer.name) || '', total: inv.total, from: inv.from, to: inv.to, created: Date.now() });
+  (inv.lines || []).forEach(l => { if (l.ataId) { const x = db.atas.find(a => a.id === l.ataId); if (x && x.status === 'godkand') x.status = 'fakturerad'; } });
+  save();
+}
+async function invWarnOrGo(inv, fn) {
+  const missP = inv.missing || [], missS = invMissingSetup(inv);
+  let msg = '';
+  if (missP.length) msg += `Pris saknas för: ${missP.join(', ')}. En riktig faktura ska ha à-pris. `;
+  if (missS.length) msg += `Uppgifter saknas: ${missS.join(', ')}. Fyll i under ⚙ → Fakturauppgifter. `;
+  if (msg && !confirm(msg + 'Skapa PDF ändå?')) return null;
+  const file = await fn(inv);
+  return file;
+}
+function renderInv() {
+  if (!invForm) invForm = defaultInvForm();
+  if (typeof ensureInvoiceSettings === 'function') ensureInvoiceSettings(S());
+  const inv = invDraft(), r = invRange(), weeks = weeksAvail(), custs = S().customers || [];
+  const projs = S().projects || [];
+  const no = inv.no;
+  const lineRows = inv.lines.map(l => l.kind === 'section'
+    ? `<tr class="sec"><td colspan="5">${esc(l.title)}</td></tr>`
+    : `<tr><td><b>${esc(l.title)}</b><div class="muted small">${esc(l.detail || '')}</div></td><td class="n">${esc(invQty(l.qty))}</td><td>${esc(l.unit || '')}</td><td class="n ${l.missing ? 'miss' : ''}">${l.missing ? 'pris saknas' : esc(invSEK(l.price, false))}</td><td class="n ${l.missing ? 'miss' : ''}">${l.missing ? '—' : esc(invSEK(l.amount, false))}</td></tr>`
+  ).join('');
+  const issued = (db.invoices || []).slice(0, 8);
+  $('#view-inv').innerHTML = `
+  <div class="inv-head"><h1>Faktura</h1><div class="no">${esc(no)}</div></div>
+  <p class="inv-period">${esc(r.from === r.to ? invLongDate(r.from) : inv.periodLabel)}</p>
+  <div class="card">
+    <div class="lbl">Kund</div>
+    ${custs.length ? `<select id="invCust" aria-label="Kund">${custs.map(c => `<option value="${esc(c.id)}"${c.id === invForm.customerId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>` : '<p class="muted">Ingen kund ännu – lägg till under ⚙ → Kunder.</p>'}
+    <button class="secondary" data-act="goSetInv" style="margin-top:8px">Lägg till / redigera kunder i inställningar</button>
+  </div>
+  <div class="card">
+    <div class="seg small"><button data-act="invMode" data-v="weeks" class="${invForm.mode === 'weeks' ? 'on' : ''}">Veckor</button><button data-act="invMode" data-v="range" class="${invForm.mode === 'range' ? 'on' : ''}">Datumintervall</button></div>
+    ${invForm.mode === 'weeks' ? `<div class="lbl">Välj en eller flera veckor</div><div class="inv-chips" id="invWeeks">${weeks.map(w => `<button type="button" class="${invForm.weeks.includes(w.key) ? 'sel' : ''}${w.has ? ' has' : ''}" data-act="invWeek" data-v="${w.key}">v ${w.week}<br><small>${(() => { const a=parse(w.from), b=parse(w.to), ma=MONTHS[a.getMonth()].slice(0,3), mb=MONTHS[b.getMonth()].slice(0,3); return a.getMonth()===b.getMonth() ? `${a.getDate()}–${b.getDate()} ${ma}` : `${a.getDate()} ${ma}–${b.getDate()} ${mb}`; })()}</small></button>`).join('')}</div>` : `<div class="grid2"><label>Från<input type="date" id="invFrom" value="${esc(invForm.from)}"></label><label>Till<input type="date" id="invTo" value="${esc(invForm.to)}"></label></div>`}
+    <div class="lbl">Projekt <span class="opt">tomt = alla</span></div>
+    <div class="inv-chips">${projs.map(pj => `<button type="button" class="${invForm.projects.includes(pj) ? 'sel' : ''}" data-act="invProj" data-v="${esc(pj)}">${esc(pj)}</button>`).join('')}</div>
+  </div>
+  <div class="card">
+    <div class="grid2"><label>Fakturadatum<input type="date" id="invDate" value="${esc(invForm.date)}"></label><label>Förfallodag<input type="date" id="invDue" value="${esc(invForm.due)}"></label></div>
+    <div class="grid2"><label>Vår referens<input type="text" id="invOur" value="${esc(invForm.ourRef)}"></label><label>Er referens<input type="text" id="invTheir" value="${esc(invForm.theirRef)}"></label></div>
+    <label>Meddelande på fakturan <span class="opt">valfritt</span><input type="text" id="invNote" value="${esc(invForm.note)}" placeholder="t.ex. enligt överenskommelse"></label>
+  </div>
+  ${inv.missing.length ? `<div class="inv-warn">Pris saknas på ${inv.missing.length} rad${inv.missing.length > 1 ? 'er' : ''}<span>${esc(inv.missing.join(', '))} — fyll i timpris under ⚙ → Resurser, eller skapa PDF med tydlig varning.</span></div>` : ''}
+  ${invMissingSetup(inv).length ? `<div class="inv-warn">Fakturauppgifter saknas<span>${esc(invMissingSetup(inv).join(', '))} — fyll i under ⚙. Fälten lämnas tomma tills du skriver in dem.</span></div>` : ''}
+  <div class="card">
+    <div class="lbl">Sammanställning</div>
+    ${inv.lines.length ? `<table class="inv-lines"><thead><tr><th>Beskrivning</th><th class="n">Antal</th><th>Enh.</th><th class="n">À-pris</th><th class="n">Belopp</th></tr></thead><tbody>${lineRows}</tbody></table>
+    <p style="text-align:right;margin:10px 0 0;font-variant-numeric:tabular-nums"><span class="muted">Delsumma ${esc(invSEK(inv.subtotal, false))} · Moms 25 % ${esc(invSEK(inv.vat, false))}</span><br><b>Att betala ${esc(invSEK(inv.total, true))}</b></p>` : '<p class="muted">Inga timmar, artiklar eller godkända ÄTA i urvalet.</p>'}
+  </div>
+  <div id="invPrevWrap">${invForm.preview ? `<div class="inv-prev"><img id="invPrevImg" alt="Förhandsvisning av faktura"></div>` : ''}</div>
+  <button class="primary" data-act="invShare" id="invShareBtn"${inv.lines.length ? '' : ' disabled'}>Dela faktura</button>
+  <div class="grid2" style="margin-top:8px"><button class="secondary" data-act="invPreview">Förhandsvisa</button><button class="secondary" data-act="invPdf">Spara PDF</button></div>
+  ${issued.length ? `<div class="card" style="margin-top:16px"><h2>Tidigare fakturor</h2><ul class="week">${issued.map(x => `<li><div class="wl"><span>${esc(x.no)} · ${esc(x.customer || '')}<small class="muted" style="display:block">${esc(x.date)} · ${esc(invSEK(x.total, true))}</small></span></div></li>`).join('')}</ul></div>` : ''}
+  <p class="muted small center">Fakturan skapas i telefonen och delas som PDF, precis som veckorapporten.</p>`;
+  if (invForm.preview) {
+    const img = $('#invPrevImg');
+    if (img) img.src = invForm.preview;
+  }
+}
+async function invDoPreview() {
+  const inv = invDraft();
+  if (!inv.lines.length) return toast('Inget att fakturera i urvalet');
+  toast('Skapar förhandsvisning…');
+  const blob = await buildInvoicePdf(inv);
+  const page = blob.__pages && blob.__pages[0];
+  if (page) invForm.preview = page.toDataURL('image/jpeg', 0.85);
+  renderInv();
+  const el = $('#invPrevWrap'); if (el) el.scrollIntoView({ block: 'center' });
+}
+async function invDoPdf(share) {
+  const inv = invDraft();
+  if (!inv.lines.length) return toast('Inget att fakturera i urvalet');
+  const file = await invWarnOrGo(inv, invMakePdf);
+  if (!file) return;
+  invCommit(inv);
+  if (share) {
+    const subject = `Faktura ${inv.no} från ${inv.seller.name}`;
+    const body = `${inv.seller.name} skickar faktura ${inv.no} på ${invSEK(inv.total, true)}. Förfallodag ${invLongDate(inv.due)}.`;
+    const to = (inv.buyer && inv.buyer.email) || '';
+    if (to) { try { await navigator.clipboard.writeText(to); } catch (e) {} }
+    try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: subject, text: body }); toast(to ? 'Mottagarens e-post är kopierad – klistra in i Till' : 'Delad ✓'); renderInv(); return; } }
+    catch (e) { if (e.name === 'AbortError') { renderInv(); return; } }
+    download(file.name, file, 'application/pdf');
+    const mail = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body + '\\n\\nBifoga PDF:en ' + file.name + ' från Hämtade filer.')}`;
+    openMail(mail);
+    toast('PDF sparad – bifoga den i mejlet');
+  } else {
+    download(file.name, file, 'application/pdf');
+    toast('Faktura sparad ✓');
+  }
+  renderInv();
+}
+
 /* ================= Navigering & händelser ================= */
 let view = 'today';
-const RENDER = { today: renderToday, week: renderWeek, set: renderSet };
+const RENDER = { today: renderToday, week: renderWeek, inv: renderInv, set: renderSet };
 function renderView() { RENDER[view](); if (sheet) renderSheet(); }
 function show(v) {
   view = v; $$('.view').forEach(s => s.classList.toggle('active', s.id === 'view-' + v));
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
   if (v === 'set') st = null;
+  if (v === 'inv') { if (!invForm) invForm = defaultInvForm(); }
   if (v === 'week') { wk = isoWeek(parse(cur)); mo = { y: parse(cur).getFullYear(), m: parse(cur).getMonth() }; }
   RENDER[v](); window.scrollTo(0, 0);
 }
@@ -1074,7 +1266,7 @@ const ACT = {
   exArtNew: () => { const n = (prompt('Ny artikel (t.ex. Kabelvagn)') || '').trim(); if (!n) return; if (!S().articles.some(x => x.name === n)) { S().articles.push({ name: n, unit: 'st' }); save(); } ex.arts[n] = 1; renderSheet(); },
   exSaveArt: saveArts, exEdit: el => editExtra(el.dataset.v), exCancel: resetEx,
   exDel: async () => { const x = db.extras.find(y => y.id === ex.editId); if (!x || !confirm('Ta bort?')) return; db.extras = db.extras.filter(y => y !== x); save(); await deleteImages(x.imageIds); resetEx(); toast('Borttagen'); },
-  artDefAdd: () => { st.articles.push({ name: '', unit: 'st' }); renderSet(); },
+  artDefAdd: () => { st.articles.push({ name: '', unit: 'st', price: '' }); renderSet(); },
   artDefDel: el => { st.articles.splice(+el.dataset.v, 1); renderSet(); },
   newDev: () => { dv = newDev(); openSheet('dev'); },
   devEdit: el => { const x = byId(db.devs, el); dv = { ...clone(x), hours: x.hours || '' }; openSheet('dev'); },
@@ -1122,7 +1314,16 @@ const ACT = {
   matDefDel: el => { st.materials.splice(+el.dataset.v, 1); renderSet(); },
   setSave: saveSettings,
   csv: () => { download(`tidrapport-${today()}.csv`, toCSV(), 'text/csv;charset=utf-8'); toast('CSV exporterad'); },
-  backup
+  backup,
+  custAdd: () => { if (!st.customers) st.customers = []; st.customers.push({ id: uid(), name: '', addr: '', zip: '', city: '', orgNr: '', vatNr: '', ref: '', email: '' }); renderSet(); },
+  custDel: el => { st.customers.splice(+el.dataset.v, 1); renderSet(); },
+  goSetInv: () => show('set'),
+  invMode: el => { invForm.mode = el.dataset.v; invForm.preview = null; renderInv(); },
+  invWeek: el => { const k = el.dataset.v, i = invForm.weeks.indexOf(k); if (i >= 0) { if (invForm.weeks.length > 1) invForm.weeks.splice(i, 1); } else invForm.weeks.push(k); invForm.preview = null; renderInv(); },
+  invProj: el => { const p = el.dataset.v, i = invForm.projects.indexOf(p); if (i >= 0) invForm.projects.splice(i, 1); else invForm.projects.push(p); invForm.preview = null; renderInv(); },
+  invPreview: () => invDoPreview().catch(e => { console.error(e); toast('Kunde inte skapa förhandsvisning'); }),
+  invPdf: () => invDoPdf(false).catch(e => { console.error(e); toast('Kunde inte skapa PDF'); }),
+  invShare: () => invDoPdf(true).catch(e => { console.error(e); toast('Kunde inte dela fakturan'); })
 };
 document.addEventListener('click', e => {
   const img = e.target.closest('img[data-img]'); if (img) return openLightbox(img.dataset.img);
@@ -1143,11 +1344,21 @@ document.addEventListener('input', e => {
     case 'dPlace': return setDay(cur, { place: val });
     case 'dvDesc': dv.desc = val; return; case 'dvDate': dv.date = val; return; case 'dvHours': dv.hours = val; return; case 'dvProject': dv.project = val; return;
     case 'atDesc': at.desc = val; return; case 'atBy': at.orderedBy = val; return; case 'atDate': at.date = val; return; case 'atHours': at.hours = val; return; case 'atProject': at.project = val; return; case 'atSub': at.sub = val; return; case 'atMat': at.material = val; return; case 'atAmount': at.amount = val; return; case 'atCat': at.categoryId = val; return;
+    case 'invCust': invForm.customerId = val; { const c = invCustomer(); if (c && c.ref) invForm.theirRef = c.ref; } invForm.preview = null; renderInv(); return;
+    case 'invDate': invForm.date = val; invForm.preview = null; return;
+    case 'invDue': invForm.due = val; invForm.preview = null; return;
+    case 'invOur': invForm.ourRef = val; return;
+    case 'invTheir': invForm.theirRef = val; return;
+    case 'invNote': invForm.note = val; return;
+    case 'invFrom': invForm.from = val; invForm.preview = null; renderInv(); return;
+    case 'invTo': invForm.to = val; invForm.preview = null; renderInv(); return;
   }
   if (t.dataset.q) rd.addons[t.dataset.q] = val;
   else if (t.dataset.km) rd.km[t.dataset.km] = val;
   else if (t.dataset.mat) rd.materials[+t.dataset.mat].qty = val;
   else if (t.dataset.s) st[t.dataset.s] = val;
+  else if (t.dataset.inv) { st.invoice = st.invoice || (typeof defaultInvoiceSettings === 'function' ? defaultInvoiceSettings() : {}); st.invoice[t.dataset.inv] = t.type === 'checkbox' ? !!val : val; if (t.dataset.inv === 'orgNr' && !st.invoice.vatNr) { const auto = typeof invVatFromOrg === 'function' ? invVatFromOrg(val) : ''; const el = $('#invVatNr'); if (auto && el && !el.value) el.placeholder = auto; } }
+  else if (t.dataset.cu) { const [i, k] = t.dataset.cu.split('.'); st.customers[+i][k] = val; }
   else if (t.dataset.c) { const [ci, k] = t.dataset.c.split('.'); st.categories[+ci][k] = val; }
   else if (t.dataset.a) { const [ci, ai, k] = t.dataset.a.split('.'); st.categories[+ci].addons[+ai][k] = val; }
   else if (t.dataset.artq) ex.arts[t.dataset.artq] = val;
