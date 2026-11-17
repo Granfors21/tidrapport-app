@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1C1C1C">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Enkel tidrapport för maskin, åkeri och anläggning – fungerar offline.">
+<title>Tidrapport</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="sidebrand" id="sideBrand" aria-hidden="true"><span id="sideBrandText">Granfors Åkeri AB</span></div>
+<div id="app">
+  <header class="top"><div class="sub" id="topSub"></div><button class="prof" id="profBtn" aria-label="Konto (valfritt)">👤</button></header>
+  <main>
+    <section id="view-today" class="view active"></section>
+    <section id="view-week" class="view"></section>
+    <section id="view-inv" class="view"></section>
+    <section id="view-set" class="view"></section>
+  </main>
+  <nav class="tabs" id="tabs">
+    <button data-v="today" class="on"><span>●</span>Idag</button>
+    <button data-v="week"><span>▦</span>Vecka</button>
+    <button data-v="inv"><span>▣</span>Faktura</button>
+    <button data-v="set"><span>⚙</span>Inställ.</button>
+  </nav>
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+<div id="sheet" class="hidden" role="dialog" aria-modal="true"><div id="sheetBg"></div><div id="sheetBody"></div></div>
+<div id="setup" class="hidden" role="dialog" aria-label="Välkommen"></div>
+<div id="lightbox" class="hidden" role="dialog" aria-label="Bild">
+  <img id="lbImg" alt="">
+  <div class="lbbar"><button id="lbDel" class="danger">Radera bild</button><button id="lbClose" class="primary">Stäng</button></div>
+</div>
+<div id="lock" class="hidden" role="dialog" aria-label="Lås"></div>
+<div id="scan" class="hidden" role="dialog" aria-label="Skanna QR"><video id="scanVideo" playsinline muted></video><p>Rikta kameran mot QR-koden</p><button class="primary" data-act="scanClose">Avbryt</button></div>
+<div id="print"></div>
+<script src="lib/qrcode.js"></script>
+<script src="pdf.js"></script>
+<script src="fonts-data.js"></script>
+<script src="invoice.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
