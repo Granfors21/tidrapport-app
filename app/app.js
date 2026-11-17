@@ -1,5 +1,5 @@
 'use strict';
-const VERSION = '4.4.1';
+const VERSION = '4.4.2';
 const BRAND = 'Granfors Åkeri AB';
 const brand = () => (db && db.settings && db.settings.company) || BRAND;
 const KEY = 'tidrapport.v2', KEY1 = 'tidrapport.v1';
@@ -38,7 +38,7 @@ function defaultCategories() {
     { id: uid(), name: 'Lastbil', icon: '🚚', rate: '', km: true, addons: [a('Kran'), a('Släp'), a('Flak'), a('Tippsläp'), a('Maskinsläp'), a('Väntetid', 'h')] },
     { id: uid(), name: 'Grävmaskin', icon: '🏗️', rate: '', km: false, addons: [a('Rototilt'), a('Sorteringsgrip'), a('Hydraulhammare', 'h'), a('Planeringsskopa'), a('Tjälkrok'), a('Pallgafflar'), a('Maskinstyrning/GPS')] },
     { id: uid(), name: 'Lastmaskin', icon: '🚜', rate: '', km: false, addons: [a('Skopa'), a('Pallgafflar'), a('Snöblad', 'h'), a('Sopvals', 'h')] },
-    { id: uid(), name: 'Traktorgrävare', icon: '🛞', rate: '', km: false, addons: [a('Hammare', 'h'), a('Sopvals', 'h'), a('Slåtteraggregat', 'h')] },
+    { id: uid(), name: 'Traktorgrävare', icon: '🛞', rate: '', km: false, addons: [a('Kättinghuvud'), a('Petterssonspel'), a('Korg'), a('Snöplog'), a('Sandspridare'), a('Vattentank')] },
     { id: uid(), name: 'Anläggare', icon: '👷', rate: '', km: false, addons: personAddons() },
     { id: uid(), name: 'Maskinist', icon: '🧑‍🔧', rate: '', km: false, addons: personAddons() }
   ];
@@ -63,11 +63,25 @@ function migrateV1(d) {
   }
   return db;
 }
+
+const TRAKTOR_ADDONS = ['Kättinghuvud', 'Petterssonspel', 'Korg', 'Snöplog', 'Sandspridare', 'Vattentank'];
+const normName = s => String(s || '').toLowerCase().replace(/[\s\-]+/g, '');
+function ensureTraktorgravare(settings) {
+  if (settings.patch442) return;
+  const cats = settings.categories || (settings.categories = []);
+  let c = cats.find(x => normName(x.name) === normName('Traktorgrävare'));
+  if (!c) { c = { id: uid(), name: 'Traktorgrävare', icon: '🛞', rate: '', km: false, addons: [] }; cats.push(c); }
+  if (c.name !== 'Traktorgrävare') c.name = 'Traktorgrävare';
+  if (!Array.isArray(c.addons)) c.addons = [];
+  TRAKTOR_ADDONS.forEach(name => { if (!c.addons.some(x => normName(x.name) === normName(name))) c.addons.push(a(name)); });
+  settings.patch442 = true;
+}
 function normalize(d) {
   const db = { ...emptyDb(), ...d }; db.settings = { ...defaultSettings(), ...d.settings }; if (db.settings.setupDone === undefined) db.settings.setupDone = db.rows.length > 0 || (d.rows || []).length > 0;
   ['rows', 'devs', 'atas', 'extras'].forEach(k => db[k] = Array.isArray(db[k]) ? db[k] : []); db.extras = db.extras.filter(x => x.kind !== 'meal');
   db.atas.forEach(x => { if (x.status === 'beordrad' || x.status === 'utford') x.status = 'begard'; if (!x.type) x.type = 'tillagg'; }); db.days = db.days || {};
   Object.entries(db.days).forEach(([d, v]) => { if (v.imageIds && v.imageIds.length) { db.extras.push({ id: uid(), date: d, kind: 'photo', project: (db.rows.find(r => r.date === d) || {}).project || db.settings.defaultProject, sub: '', imageIds: v.imageIds, note: '', created: Date.now() }); v.imageIds = []; } });
+  ensureTraktorgravare(db.settings);
   return ensureTeam(db);
 }
 function load() {
